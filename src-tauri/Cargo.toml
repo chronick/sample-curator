@@ -17,10 +17,10 @@ tauri = { version = "1.5", features = [ "protocol-asset", "dialog-all", "fs-all"
 rodio = { version = "0.17", default-features = false, features = ["wav", "mp3", "flac", "vorbis"] }
 
 # Native audio analysis (Rust implementation)
-sample-analysis-core = { path = "../../sample-analysis-core/crates/sample-analysis-core" }
+sample-analysis-core = { path = "../../sample-analysis/crates/sample-analysis-core" }
 
 # Library core (database, embeddings, similarity search)
-sample-library-core = { path = "../../sample-library-core" }
+sample-library-core = { path = "../../sample-library/crates/sample-library-core" }
 
 [features]
 default = ["custom-protocol"]
