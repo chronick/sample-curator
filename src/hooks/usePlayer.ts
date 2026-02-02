@@ -9,6 +9,7 @@ interface PlayerState {
   currentSample: string | null;
   isPlaying: boolean;
   duration: number;
+  position: number;
 }
 
 export function usePlayer() {
@@ -16,6 +17,7 @@ export function usePlayer() {
     currentSample: null,
     isPlaying: false,
     duration: 0,
+    position: 0,
   });
 
   // Poll for playback status
@@ -26,7 +28,10 @@ export function usePlayer() {
 
     pollRef.current = window.setInterval(async () => {
       try {
-        const [isPlaying, isPaused, duration] = await invoke<[boolean, boolean, number]>("audio_get_status");
+        const [isPlaying, isPaused, duration, position] = await invoke<[boolean, boolean, number, number]>("audio_get_status");
+
+        // Update position for playhead animation
+        setState((s) => ({ ...s, position, duration }));
 
         // Stop polling if playback finished
         if (!isPlaying && !isPaused) {
@@ -34,12 +39,12 @@ export function usePlayer() {
             window.clearInterval(pollRef.current);
             pollRef.current = null;
           }
-          setState((s) => ({ ...s, isPlaying: false }));
+          setState((s) => ({ ...s, isPlaying: false, position: 0 }));
         }
       } catch (err) {
         // Ignore errors during polling
       }
-    }, 500); // Poll less frequently
+    }, 100); // Poll frequently for smooth playhead
   }, []);
 
   const stopPolling = useCallback(() => {
@@ -57,12 +62,12 @@ export function usePlayer() {
   // Play a sample
   const play = useCallback(async (path: string) => {
     console.log("Playing audio via Rust:", path);
-    setState((s) => ({ ...s, currentSample: path }));
+    setState((s) => ({ ...s, currentSample: path, position: 0 }));
 
     try {
       const duration = await invoke<number>("audio_play", { path });
       console.log("Audio playing, duration:", duration);
-      setState((s) => ({ ...s, isPlaying: true, duration }));
+      setState((s) => ({ ...s, isPlaying: true, duration, position: 0 }));
       startPolling();
     } catch (err) {
       console.error("Failed to play audio:", err);
@@ -126,12 +131,15 @@ export function usePlayer() {
     }
   }, []);
 
+  // Calculate progress as ratio of position/duration
+  const progress = state.duration > 0 ? state.position / state.duration : 0;
+
   return {
     currentSample: state.currentSample,
     isPlaying: state.isPlaying,
-    currentTime: 0, // Not available with rodio sink
+    currentTime: state.position,
     duration: state.duration,
-    progress: 0, // Not available with rodio sink
+    progress,
     play,
     pause,
     toggle,

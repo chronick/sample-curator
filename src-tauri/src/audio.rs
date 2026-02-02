@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::{channel, Sender};
 use std::sync::Mutex;
 use std::thread;
+use std::time::{Duration, Instant};
 
 // Commands sent to the audio thread
 enum AudioCommand {
@@ -20,6 +21,7 @@ pub struct AudioStatus {
     pub is_playing: bool,
     pub is_paused: bool,
     pub duration: f64,
+    pub position: f64,
 }
 
 // Audio thread that owns the rodio objects
@@ -39,6 +41,11 @@ fn audio_thread(rx: std::sync::mpsc::Receiver<AudioCommand>) {
 
     let mut sink: Option<Sink> = None;
     let mut duration: f64 = 0.0;
+
+    // Position tracking
+    let mut play_started_at: Option<Instant> = None;
+    let mut paused_at: Option<Instant> = None;
+    let mut total_paused_duration: Duration = Duration::ZERO;
 
     loop {
         match rx.recv() {
@@ -76,7 +83,12 @@ fn audio_thread(rx: std::sync::mpsc::Receiver<AudioCommand>) {
                 };
 
                 // Get duration
-                duration = source.total_duration().map(|d: std::time::Duration| d.as_secs_f64()).unwrap_or(0.0);
+                duration = source.total_duration().map(|d: Duration| d.as_secs_f64()).unwrap_or(0.0);
+
+                // Reset position tracking
+                play_started_at = Some(Instant::now());
+                paused_at = None;
+                total_paused_duration = Duration::ZERO;
 
                 // Play
                 new_sink.append(source);
@@ -88,11 +100,19 @@ fn audio_thread(rx: std::sync::mpsc::Receiver<AudioCommand>) {
             Ok(AudioCommand::Pause) => {
                 if let Some(ref s) = sink {
                     s.pause();
+                    // Record when we paused
+                    if paused_at.is_none() {
+                        paused_at = Some(Instant::now());
+                    }
                 }
             }
             Ok(AudioCommand::Resume) => {
                 if let Some(ref s) = sink {
                     s.play();
+                    // Add pause duration to total
+                    if let Some(pause_time) = paused_at.take() {
+                        total_paused_duration += pause_time.elapsed();
+                    }
                 }
             }
             Ok(AudioCommand::Stop) => {
@@ -100,6 +120,9 @@ fn audio_thread(rx: std::sync::mpsc::Receiver<AudioCommand>) {
                     s.stop();
                 }
                 duration = 0.0;
+                play_started_at = None;
+                paused_at = None;
+                total_paused_duration = Duration::ZERO;
             }
             Ok(AudioCommand::SetVolume(vol)) => {
                 if let Some(ref s) = sink {
@@ -108,16 +131,36 @@ fn audio_thread(rx: std::sync::mpsc::Receiver<AudioCommand>) {
             }
             Ok(AudioCommand::GetStatus(reply)) => {
                 let status = if let Some(ref s) = sink {
+                    let is_playing = !s.empty();
+                    let is_paused = s.is_paused();
+
+                    // Calculate current position
+                    let position = if let Some(start) = play_started_at {
+                        let elapsed = start.elapsed();
+                        let paused_time = if let Some(pause_time) = paused_at {
+                            total_paused_duration + pause_time.elapsed()
+                        } else {
+                            total_paused_duration
+                        };
+                        let pos = elapsed.saturating_sub(paused_time).as_secs_f64();
+                        // Clamp to duration
+                        pos.min(duration)
+                    } else {
+                        0.0
+                    };
+
                     AudioStatus {
-                        is_playing: !s.empty(),
-                        is_paused: s.is_paused(),
+                        is_playing,
+                        is_paused,
                         duration,
+                        position,
                     }
                 } else {
                     AudioStatus {
                         is_playing: false,
                         is_paused: false,
                         duration: 0.0,
+                        position: 0.0,
                     }
                 };
                 let _ = reply.send(status);

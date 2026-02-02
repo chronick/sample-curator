@@ -62,9 +62,9 @@ fn audio_set_volume(volume: f32, state: State<'_, AppState>) -> Result<(), Strin
 }
 
 #[tauri::command]
-fn audio_get_status(state: State<'_, AppState>) -> Result<(bool, bool, f64), String> {
+fn audio_get_status(state: State<'_, AppState>) -> Result<(bool, bool, f64, f64), String> {
     let status = state.audio.get_status()?;
-    Ok((status.is_playing, status.is_paused, status.duration))
+    Ok((status.is_playing, status.is_paused, status.duration, status.position))
 }
 
 fn main() {
