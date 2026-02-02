@@ -142,6 +142,7 @@ export function usePlayer() {
     progress,
     play,
     pause,
+    resume,
     toggle,
     stop,
     seek,

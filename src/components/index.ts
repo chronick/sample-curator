@@ -4,3 +4,6 @@ export { WaveformView } from "./WaveformView";
 export { ImportDialog } from "./ImportDialog";
 export { TagEditor } from "./TagEditor";
 export { ScoreIndicator } from "./ScoreIndicator";
+export { SimilarityPanel } from "./SimilarityPanel";
+export { ProjectsPanel } from "./ProjectsPanel";
+export { DuplicatesPanel } from "./DuplicatesPanel";

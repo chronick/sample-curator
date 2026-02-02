@@ -3,10 +3,21 @@
     windows_subsystem = "windows"
 )]
 
+mod analysis;
 mod audio;
+mod categorization;
+mod duplicates;
+mod jobs;
+mod projects;
+mod search;
 mod sidecar;
 
 use audio::AudioState;
+use categorization::CategorizationState;
+use duplicates::DuplicateState;
+use jobs::JobState;
+use projects::ProjectState;
+use search::SearchState;
 use sidecar::SidecarManager;
 use std::sync::Mutex;
 use tauri::State;
@@ -73,6 +84,11 @@ fn main() {
             sidecar: Mutex::new(None),
             audio: AudioState::new(),
         })
+        .manage(SearchState::new())
+        .manage(ProjectState::new())
+        .manage(CategorizationState::new())
+        .manage(DuplicateState::new())
+        .manage(JobState::new())
         .invoke_handler(tauri::generate_handler![
             sidecar_call,
             audio_play,
@@ -80,7 +96,46 @@ fn main() {
             audio_resume,
             audio_stop,
             audio_set_volume,
-            audio_get_status
+            audio_get_status,
+            // Native analysis commands (bypass sidecar for hot paths)
+            analysis::native_spectrogram,
+            analysis::native_waveform,
+            analysis::native_quality,
+            analysis::native_audio_info,
+            // Similarity and compatibility search
+            search::find_similar,
+            search::find_compatible,
+            search::generate_embedding,
+            search::generate_missing_embeddings,
+            search::get_search_stats,
+            // Project management
+            projects::create_project,
+            projects::list_projects,
+            projects::get_project,
+            projects::update_project,
+            projects::delete_project,
+            projects::get_project_samples,
+            projects::add_sample_to_project,
+            projects::remove_sample_from_project,
+            projects::update_project_sample,
+            projects::export_project_command,
+            // Categorization
+            categorization::get_acoustic_tags,
+            categorization::suggest_type,
+            categorization::batch_get_acoustic_tags,
+            // Duplicates
+            duplicates::get_duplicate_groups,
+            duplicates::get_duplicate_stats,
+            duplicates::delete_duplicate,
+            duplicates::resolve_duplicate_group,
+            // Background jobs
+            jobs::get_job_stats,
+            jobs::queue_missing_embeddings,
+            jobs::queue_sample_job,
+            jobs::start_job_worker,
+            jobs::stop_job_worker,
+            jobs::reset_stuck_jobs,
+            jobs::cleanup_old_jobs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

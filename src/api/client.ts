@@ -13,6 +13,16 @@ import type {
   WaveformData,
   SpectrogramData,
   AnalysisResult,
+  SearchAspects,
+  SimilarityResult,
+  CompatibilityCriteria,
+  CompatibilityResult,
+  SearchStats,
+  Project,
+  ProjectSample,
+  CreateProjectInput,
+  UpdateProjectInput,
+  ExportProjectInput,
 } from "./types";
 
 let requestId = 0;
@@ -204,6 +214,202 @@ export const api = {
   async batchAddTags(ids: number[], tags: string[]): Promise<number> {
     return rpcCall<number>("batch_add_tags", { ids, tags });
   },
+
+  // ============ Native Search Commands (Rust, bypasses Python sidecar) ============
+
+  /**
+   * Find similar samples using native Rust similarity search.
+   */
+  async findSimilar(
+    sampleId: number,
+    limit?: number,
+    aspects?: SearchAspects
+  ): Promise<SimilarityResult[]> {
+    return invoke<SimilarityResult[]>("find_similar", {
+      sampleId,
+      limit,
+      aspects,
+    });
+  },
+
+  /**
+   * Find compatible samples (for layering, mixing).
+   */
+  async findCompatible(
+    sampleId: number,
+    limit?: number,
+    criteria?: CompatibilityCriteria
+  ): Promise<CompatibilityResult[]> {
+    return invoke<CompatibilityResult[]>("find_compatible", {
+      sampleId,
+      limit,
+      criteria,
+    });
+  },
+
+  /**
+   * Generate embedding for a sample.
+   */
+  async generateEmbedding(sampleId: number): Promise<boolean> {
+    return invoke<boolean>("generate_embedding", { sampleId });
+  },
+
+  /**
+   * Generate embeddings for samples that don't have them.
+   */
+  async generateMissingEmbeddings(batchSize?: number): Promise<number> {
+    return invoke<number>("generate_missing_embeddings", { batchSize });
+  },
+
+  /**
+   * Get search index statistics.
+   */
+  async getSearchStats(): Promise<SearchStats> {
+    return invoke<SearchStats>("get_search_stats");
+  },
+
+  // ============ Project Commands (Native Rust) ============
+
+  /**
+   * Create a new project.
+   */
+  async createProject(input: CreateProjectInput): Promise<Project> {
+    return invoke<Project>("create_project", { input });
+  },
+
+  /**
+   * List all projects.
+   */
+  async listProjects(): Promise<Project[]> {
+    return invoke<Project[]>("list_projects");
+  },
+
+  /**
+   * Get a project by ID.
+   */
+  async getProject(projectId: number): Promise<Project | null> {
+    return invoke<Project | null>("get_project", { projectId });
+  },
+
+  /**
+   * Update a project.
+   */
+  async updateProject(projectId: number, input: UpdateProjectInput): Promise<Project> {
+    return invoke<Project>("update_project", { projectId, input });
+  },
+
+  /**
+   * Delete a project.
+   */
+  async deleteProject(projectId: number): Promise<void> {
+    return invoke<void>("delete_project", { projectId });
+  },
+
+  /**
+   * Get samples in a project.
+   */
+  async getProjectSamples(projectId: number): Promise<ProjectSample[]> {
+    return invoke<ProjectSample[]>("get_project_samples", { projectId });
+  },
+
+  /**
+   * Add a sample to a project.
+   */
+  async addSampleToProject(
+    projectId: number,
+    sampleId: number,
+    notes?: string,
+    role?: string
+  ): Promise<void> {
+    return invoke<void>("add_sample_to_project", {
+      projectId,
+      sampleId,
+      input: notes || role ? { notes, role } : null,
+    });
+  },
+
+  /**
+   * Remove a sample from a project.
+   */
+  async removeSampleFromProject(projectId: number, sampleId: number): Promise<void> {
+    return invoke<void>("remove_sample_from_project", {
+      projectId,
+      sampleId,
+    });
+  },
+
+  /**
+   * Export a project.
+   */
+  async exportProject(projectId: number, input: ExportProjectInput): Promise<string[]> {
+    return invoke<string[]>("export_project_command", { projectId, input });
+  },
+
+  // ============ Background Job Commands (Native Rust) ============
+
+  /**
+   * Get job queue statistics.
+   */
+  async getJobStats(): Promise<JobStatusResponse> {
+    return invoke<JobStatusResponse>("get_job_stats");
+  },
+
+  /**
+   * Queue embedding jobs for all samples missing embeddings.
+   */
+  async queueMissingEmbeddings(priority?: number): Promise<number> {
+    return invoke<number>("queue_missing_embeddings", { priority });
+  },
+
+  /**
+   * Queue a job for a specific sample.
+   */
+  async queueSampleJob(sampleId: number, jobType: string, priority?: number): Promise<number> {
+    return invoke<number>("queue_sample_job", {
+      sampleId,
+      jobType,
+      priority,
+    });
+  },
+
+  /**
+   * Start the background job worker.
+   */
+  async startJobWorker(): Promise<boolean> {
+    return invoke<boolean>("start_job_worker");
+  },
+
+  /**
+   * Stop the background job worker.
+   */
+  async stopJobWorker(): Promise<boolean> {
+    return invoke<boolean>("stop_job_worker");
+  },
+
+  /**
+   * Reset stuck jobs from previous runs.
+   */
+  async resetStuckJobs(): Promise<number> {
+    return invoke<number>("reset_stuck_jobs");
+  },
+
+  /**
+   * Clean up old completed/failed jobs.
+   */
+  async cleanupOldJobs(daysOld?: number): Promise<number> {
+    return invoke<number>("cleanup_old_jobs", { daysOld });
+  },
 };
+
+/** Job statistics response */
+export interface JobStatusResponse {
+  stats: {
+    pending: number;
+    running: number;
+    complete: number;
+    failed: number;
+  };
+  worker_running: boolean;
+}
 
 export default api;

@@ -107,3 +107,84 @@ export interface SpectrogramData {
   width: number;
   height: number;
 }
+
+// ============ Similarity & Compatibility Search ============
+
+export interface SearchAspects {
+  timbre?: number;
+  pitch?: number;
+  amplitude?: number;
+  spectrum?: number;
+}
+
+export interface SimilarityResult {
+  sample_id: number;
+  similarity: number;
+  distance: number;
+}
+
+export interface CompatibilityCriteria {
+  check_key?: boolean;
+  check_bpm?: boolean;
+  check_frequency?: boolean;
+  check_dynamics?: boolean;
+  bpm_tolerance?: number;
+}
+
+export interface CompatibilityResult {
+  sample_id: number;
+  score: number;
+  key_score: number;
+  bpm_score: number;
+  frequency_score: number;
+  dynamics_score: number;
+  notes: string[];
+}
+
+export interface SearchStats {
+  total_samples: number;
+  total_embeddings: number;
+  index_size: number;
+  index_loaded: boolean;
+}
+
+// ============ Projects ============
+
+export interface Project {
+  id: number;
+  name: string;
+  description: string | null;
+  bpm_target: number | null;
+  key_target: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  sample_count: number;
+}
+
+export interface ProjectSample {
+  project_id: number;
+  sample_id: number;
+  notes: string | null;
+  role: string | null;
+  added_at: string | null;
+}
+
+export interface CreateProjectInput {
+  name: string;
+  description?: string;
+  bpm_target?: number;
+  key_target?: string;
+}
+
+export interface UpdateProjectInput {
+  name?: string;
+  description?: string;
+  bpm_target?: number;
+  key_target?: string;
+}
+
+export interface ExportProjectInput {
+  output_dir: string;
+  naming_pattern?: string;
+  copy_files?: boolean;
+}

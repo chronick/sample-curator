@@ -2,7 +2,7 @@
  * Import dialog with wizard flow.
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { open } from "@tauri-apps/api/dialog";
 import type { ImportOptions, ImportProgress } from "../api/types";
 import { api } from "../api";
@@ -12,7 +12,7 @@ interface ImportDialogProps {
   onComplete: () => void;
 }
 
-type ImportStep = "select" | "options" | "importing" | "complete";
+type ImportStep = "select" | "options" | "importing" | "indexing" | "complete";
 
 export function ImportDialog({ onClose, onComplete }: ImportDialogProps) {
   const [step, setStep] = useState<ImportStep>("select");
@@ -26,6 +26,8 @@ export function ImportDialog({ onClose, onComplete }: ImportDialogProps) {
   const [jobId, setJobId] = useState<string | null>(null);
   const [progress, setProgress] = useState<ImportProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [embeddingsGenerated, setEmbeddingsGenerated] = useState<number>(0);
+  const [embeddingError, setEmbeddingError] = useState<string | null>(null);
 
   // Select directory
   const handleSelectDirectory = async () => {
@@ -72,6 +74,20 @@ export function ImportDialog({ onClose, onComplete }: ImportDialogProps) {
     }
   };
 
+  // Generate embeddings for imported samples
+  const generateEmbeddings = useCallback(async () => {
+    setStep("indexing");
+    try {
+      // Generate embeddings in batches
+      const count = await api.generateMissingEmbeddings(100);
+      setEmbeddingsGenerated(count);
+    } catch (err) {
+      console.error("Failed to generate embeddings:", err);
+      setEmbeddingError(err instanceof Error ? err.message : "Failed to generate embeddings");
+    }
+    setStep("complete");
+  }, []);
+
   // Poll progress
   useEffect(() => {
     if (!jobId || step !== "importing") return;
@@ -81,7 +97,15 @@ export function ImportDialog({ onClose, onComplete }: ImportDialogProps) {
         const p = await api.getImportProgress(jobId);
         setProgress(p);
 
-        if (p.phase === "complete" || p.phase === "error") {
+        if (p.phase === "complete") {
+          clearInterval(interval);
+          // After import completes, generate embeddings for similarity search
+          if (p.imported_count > 0) {
+            generateEmbeddings();
+          } else {
+            setStep("complete");
+          }
+        } else if (p.phase === "error") {
           clearInterval(interval);
           setStep("complete");
         }
@@ -91,7 +115,7 @@ export function ImportDialog({ onClose, onComplete }: ImportDialogProps) {
     }, 500);
 
     return () => clearInterval(interval);
-  }, [jobId, step]);
+  }, [jobId, step, generateEmbeddings]);
 
   // Cancel import
   const cancelImport = async () => {
@@ -235,9 +259,20 @@ export function ImportDialog({ onClose, onComplete }: ImportDialogProps) {
           )}
 
           {/* Step 3: Importing */}
-          {step === "importing" && !progress && (
+          {(step === "importing" || step === "indexing") && !progress && (
             <div className="py-8 text-center">
               <p className="text-gray-400">Starting import...</p>
+            </div>
+          )}
+          {step === "indexing" && progress && (
+            <div className="py-8 text-center">
+              <div className="animate-pulse">
+                <div className="text-4xl mb-3">🔍</div>
+                <p className="text-lg font-medium">Generating search index...</p>
+                <p className="text-sm text-gray-400 mt-2">
+                  Creating embeddings for {progress.imported_count} samples
+                </p>
+              </div>
             </div>
           )}
           {step === "importing" && progress && (
@@ -317,6 +352,10 @@ export function ImportDialog({ onClose, onComplete }: ImportDialogProps) {
                   <span className="font-medium">{progress.imported_count}</span>
                 </div>
                 <div className="flex justify-between">
+                  <span className="text-gray-400">Indexed for search:</span>
+                  <span className="font-medium">{embeddingsGenerated}</span>
+                </div>
+                <div className="flex justify-between">
                   <span className="text-gray-400">Duplicates skipped:</span>
                   <span className="font-medium">
                     {progress.duplicates_skipped}
@@ -327,6 +366,14 @@ export function ImportDialog({ onClose, onComplete }: ImportDialogProps) {
                   <span className="font-medium">{progress.errors.length}</span>
                 </div>
               </div>
+
+              {/* Embedding error */}
+              {embeddingError && (
+                <div className="mt-3 p-2 bg-yellow-900/20 border border-yellow-900/30 rounded text-xs">
+                  <span className="text-yellow-400">Search indexing issue: </span>
+                  <span className="text-yellow-300">{embeddingError}</span>
+                </div>
+              )}
 
               {/* Errors list */}
               {progress.errors.length > 0 && (
