@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "setup": "npm install && cd sidecar && uv sync --extra all",
+    "setup": "npm install && cd sidecar && uv sync --python 3.11",
     "start": "tauri dev",
     "dev": "vite",
     "build": "tsc && vite build && tauri build",
@@ -14,7 +14,8 @@
     "tauri:build": "tauri build",
     "lint": "eslint src --ext ts,tsx",
     "typecheck": "tsc --noEmit",
-    "sidecar:sync": "cd sidecar && uv sync --extra all",
+    "sidecar:sync": "cd sidecar && uv sync --python 3.11",
+    "sidecar:sync:full": "cd sidecar && uv sync --python 3.11 --extra fingerprint --extra segmentation",
     "sidecar:test": "cd sidecar && uv run pytest"
   },
   "dependencies": {

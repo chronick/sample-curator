@@ -27,6 +27,8 @@ dependencies = [
     "networkx>=3.0",
     # Audio analysis (core)
     "librosa>=0.10.0",
+    # Pin numba to version compatible with Python 3.11+
+    "numba>=0.56.0",
 ]
 
 # Path dependencies for sibling packages (resolved by uv from monorepo)
