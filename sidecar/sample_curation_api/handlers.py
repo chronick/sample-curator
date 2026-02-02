@@ -498,6 +498,43 @@ def batch_add_tags(ids: list[int], tags: list[str]) -> int:
         session.close()
 
 
+def get_spectrogram(id: int, width: int = 800, height: int = 128) -> dict:
+    """Get spectrogram data for a sample.
+
+    Returns a 2D array of normalized values (0-1) representing the mel spectrogram.
+    Rows are frequency bins (low to high), columns are time frames.
+    """
+    from sample_analysis import get_analyzer
+
+    session = get_session()
+
+    try:
+        sample = session.get(Sample, id)
+        if not sample:
+            raise ValueError(f"Sample not found: {id}")
+
+        filepath = Path(sample.path)
+        if not filepath.exists():
+            raise ValueError(f"File not found: {filepath}")
+
+        try:
+            analyzer = get_analyzer("spectrogram")
+            result = analyzer.analyze(filepath, width=width, height=height)
+
+            return {
+                "spectrogram": result.spectrogram,
+                "duration": result.duration,
+                "width": result.width,
+                "height": result.height,
+            }
+
+        except Exception as e:
+            raise ValueError(f"Failed to compute spectrogram: {e}")
+
+    finally:
+        session.close()
+
+
 def _sample_to_dict(sample: Sample) -> dict:
     """Convert Sample to dict."""
     return {
@@ -540,6 +577,7 @@ HANDLERS = {
     "get_import_progress": get_import_progress,
     "cancel_import": cancel_import,
     "get_waveform": get_waveform,
+    "get_spectrogram": get_spectrogram,
     "list_packs": list_packs,
     "analyze_sample": analyze_sample,
     "list_tags": list_tags,

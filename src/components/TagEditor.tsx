@@ -19,6 +19,7 @@ export function TagEditor({ sample, selectedCount, onUpdate }: TagEditorProps) {
   const [tagInput, setTagInput] = useState("");
   const [showConfirmDelete, setShowConfirmDelete] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
 
   // Add tag to sample
   const handleAddTag = async (tag: string) => {
@@ -51,6 +52,19 @@ export function TagEditor({ sample, selectedCount, onUpdate }: TagEditorProps) {
       console.error("Failed to remove tag:", err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Re-analyze sample
+  const handleReanalyze = async () => {
+    setAnalyzing(true);
+    try {
+      await api.analyzeSample(sample.id);
+      onUpdate();
+    } catch (err) {
+      console.error("Failed to analyze sample:", err);
+    } finally {
+      setAnalyzing(false);
     }
   };
 
@@ -101,6 +115,13 @@ export function TagEditor({ sample, selectedCount, onUpdate }: TagEditorProps) {
             <span className="text-xs text-gray-400">Applicability</span>
             <ScoreIndicator score={sample.applicability_score} />
           </div>
+          <button
+            onClick={handleReanalyze}
+            disabled={analyzing}
+            className="w-full mt-2 px-2 py-1 bg-surface hover:bg-surface-hover border border-surface-border rounded text-xs text-gray-400 hover:text-white transition-colors disabled:opacity-50"
+          >
+            {analyzing ? "Analyzing..." : "Re-analyze"}
+          </button>
         </div>
       )}
 

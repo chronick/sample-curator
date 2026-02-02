@@ -11,6 +11,7 @@ import type {
   ImportOptions,
   ImportProgress,
   WaveformData,
+  SpectrogramData,
   AnalysisResult,
 } from "./types";
 
@@ -45,15 +46,29 @@ async function rpcCall<T>(method: string, params?: Record<string, unknown>): Pro
     id: ++requestId,
   };
 
-  const response = await invoke<JsonRpcResponse<T>>("sidecar_call", {
-    request: JSON.stringify(request),
-  });
+  console.log(`[RPC] Calling ${method}...`, params);
 
-  if (response.error) {
-    throw new Error(response.error.message);
+  try {
+    // The Rust sidecar returns a JSON string, so we need to parse it
+    const responseStr = await invoke<string>("sidecar_call", {
+      request: JSON.stringify(request),
+    });
+
+    console.log(`[RPC] Raw response for ${method}:`, responseStr);
+
+    const response: JsonRpcResponse<T> = JSON.parse(responseStr);
+
+    console.log(`[RPC] Parsed response for ${method}:`, response);
+
+    if (response.error) {
+      throw new Error(response.error.message);
+    }
+
+    return response.result as T;
+  } catch (err) {
+    console.error(`[RPC] Error calling ${method}:`, err);
+    throw err;
   }
-
-  return response.result as T;
 }
 
 /**
@@ -139,6 +154,13 @@ export const api = {
    */
   async analyzeSample(id: number): Promise<AnalysisResult> {
     return rpcCall<AnalysisResult>("analyze_sample", { id });
+  },
+
+  /**
+   * Get spectrogram data for a sample.
+   */
+  async getSpectrogram(id: number, width: number = 800, height: number = 128): Promise<SpectrogramData> {
+    return rpcCall<SpectrogramData>("get_spectrogram", { id, width, height });
   },
 
   /**

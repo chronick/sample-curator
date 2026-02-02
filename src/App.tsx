@@ -48,6 +48,7 @@ function AppContent() {
     }
   }, []);
 
+
   const {
     samples,
     selectedSample,
@@ -60,7 +61,7 @@ function AppContent() {
     refresh,
   } = useLibrary();
 
-  const { currentSample, isPlaying, play, seek } = usePlayer();
+  const { currentSample, isPlaying, progress, play, seek } = usePlayer();
 
   if (initError) {
     return (
@@ -115,12 +116,14 @@ function AppContent() {
 
           {/* Waveform and details */}
           {selectedSample && (
-            <div className="h-48 border-t border-surface-border bg-surface-raised flex">
+            <div className="h-72 border-t border-surface-border bg-surface-raised flex">
               <div className="flex-1 p-4">
                 <WaveformView
                   sample={selectedSample}
                   isPlaying={isPlaying && currentSample === selectedSample.path}
+                  progress={currentSample === selectedSample.path ? progress : 0}
                   onSeek={seek}
+                  onPlay={() => play(selectedSample.path)}
                 />
               </div>
               <div className="w-72 border-l border-surface-border p-4">

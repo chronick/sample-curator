@@ -24,6 +24,10 @@
       },
       "shell": {
         "all": false
+      },
+      "protocol": {
+        "asset": true,
+        "assetScope": ["$HOME/**", "**"]
       }
     },
     "bundle": {
@@ -60,7 +64,7 @@
       }
     },
     "security": {
-      "csp": null
+      "csp": "default-src 'self' 'unsafe-inline' asset: https://asset.localhost; connect-src 'self' asset: https://asset.localhost ipc: http://ipc.localhost; img-src 'self' asset: https://asset.localhost data: blob:; media-src 'self' asset: https://asset.localhost blob: data:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'"
     },
     "updater": {
       "active": false
@@ -73,7 +77,8 @@
         "title": "Sample Curator",
         "width": 1200,
         "minWidth": 800,
-        "minHeight": 600
+        "minHeight": 600,
+        "fileDropEnabled": true
       }
     ]
   }

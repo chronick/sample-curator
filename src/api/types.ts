@@ -100,3 +100,10 @@ export interface AnalysisResult {
   quality_score: number | null;
   applicability_score: number | null;
 }
+
+export interface SpectrogramData {
+  spectrogram: number[][];  // 2D array [frequency_bins][time_frames]
+  duration: number;
+  width: number;
+  height: number;
+}

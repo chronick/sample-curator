@@ -55,13 +55,18 @@ export function ImportDialog({ onClose, onComplete }: ImportDialogProps) {
   const startImport = async () => {
     if (!selectedPath) return;
 
+    console.log("Starting import for path:", selectedPath);
+    console.log("Options:", options);
     setStep("importing");
     setError(null);
 
     try {
+      console.log("Calling api.startImport...");
       const id = await api.startImport(selectedPath, options);
+      console.log("Import started with job ID:", id);
       setJobId(id);
     } catch (err) {
+      console.error("Import failed:", err);
       setError(err instanceof Error ? err.message : "Failed to start import");
       setStep("options");
     }
@@ -131,18 +136,24 @@ export function ImportDialog({ onClose, onComplete }: ImportDialogProps) {
         <div className="p-4">
           {/* Step 1: Select directory */}
           {step === "select" && (
-            <div className="text-center py-8">
-              <p className="text-gray-400 mb-4">
-                Select a directory containing audio samples to import.
-              </p>
-              <button
-                onClick={handleSelectDirectory}
-                className="px-4 py-2 bg-accent hover:bg-accent-hover rounded font-medium transition-colors"
-              >
-                Select Directory
-              </button>
+            <div className="py-4">
+              <div className="text-center">
+                <div className="text-4xl mb-3">📁</div>
+                <p className="text-white mb-2">
+                  Select a folder containing audio samples
+                </p>
+                <p className="text-gray-400 text-sm mb-4">
+                  Supports .wav, .aif, .flac, .mp3, .ogg
+                </p>
+                <button
+                  onClick={handleSelectDirectory}
+                  className="px-6 py-2 bg-accent hover:bg-accent-hover rounded font-medium transition-colors"
+                >
+                  Select Directory
+                </button>
+              </div>
               {error && (
-                <p className="mt-4 text-red-400 text-sm">{error}</p>
+                <p className="mt-4 text-red-400 text-sm text-center">{error}</p>
               )}
             </div>
           )}
@@ -224,6 +235,11 @@ export function ImportDialog({ onClose, onComplete }: ImportDialogProps) {
           )}
 
           {/* Step 3: Importing */}
+          {step === "importing" && !progress && (
+            <div className="py-8 text-center">
+              <p className="text-gray-400">Starting import...</p>
+            </div>
+          )}
           {step === "importing" && progress && (
             <div className="py-4">
               <div className="text-center mb-4">

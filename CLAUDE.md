@@ -7,6 +7,33 @@ Desktop application for browsing, importing, tagging, and managing audio samples
 **Tech**: Tauri (Rust) + React/TypeScript + Python JSON-RPC sidecar
 **Purpose**: GUI for sample library management with waveform preview and batch operations
 
+## Design Philosophy: Thin Client
+
+**Keep sample-curator as a thin client.** Non-trivial Python code (audio processing, analysis algorithms, DSP) belongs in `sample-analysis` or `sample-library`, not here.
+
+The sidecar's `handlers.py` should:
+- **Do**: Wire up calls to `sample-library` and `sample-analysis` APIs
+- **Do**: Handle JSON-RPC protocol, sessions, error mapping
+- **Don't**: Implement audio algorithms directly (use `sample-analysis`)
+- **Don't**: Duplicate logic that exists in sibling packages
+
+Example - **Good** (delegates to sample-analysis):
+```python
+def get_spectrogram(id: int, width: int, height: int) -> dict:
+    from sample_analysis import get_analyzer
+    analyzer = get_analyzer("spectrogram")
+    result = analyzer.analyze(filepath, width=width, height=height)
+    return result.model_dump()
+```
+
+Example - **Bad** (implements algorithm inline):
+```python
+def get_spectrogram(id: int, width: int, height: int) -> dict:
+    import librosa
+    mel_spec = librosa.feature.melspectrogram(...)  # Don't do this here
+    # ... 50 lines of DSP code ...
+```
+
 ## Architecture
 
 ```
