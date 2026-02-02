@@ -29,6 +29,12 @@ export function ImportDialog({ onClose, onComplete }: ImportDialogProps) {
 
   // Select directory
   const handleSelectDirectory = async () => {
+    // Check if running inside Tauri
+    if (typeof window.__TAURI__ === "undefined") {
+      setError("Not running in Tauri. Please use the desktop app, not a browser.");
+      return;
+    }
+
     try {
       const selected = await open({
         directory: true,

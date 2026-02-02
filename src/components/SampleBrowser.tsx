@@ -162,7 +162,7 @@ export function SampleBrowser({
                 {sample.sample_type || "-"}
               </div>
               <div className="w-32 px-2 flex gap-1 overflow-hidden">
-                {sample.tags.slice(0, 3).map((tag) => (
+                {(sample.tags || []).slice(0, 3).map((tag) => (
                   <span
                     key={tag}
                     className="px-1.5 py-0.5 bg-surface-border rounded text-xs truncate"
@@ -170,7 +170,7 @@ export function SampleBrowser({
                     {tag}
                   </span>
                 ))}
-                {sample.tags.length > 3 && (
+                {(sample.tags || []).length > 3 && (
                   <span className="text-xs text-gray-500">
                     +{sample.tags.length - 3}
                   </span>

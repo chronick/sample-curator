@@ -12,7 +12,7 @@ interface FilterPanelProps {
 }
 
 export function FilterPanel({ filters, onChange }: FilterPanelProps) {
-  const { packs, allTags, resetFilters } = useStore();
+  const { packs = [], allTags = [], resetFilters } = useStore();
   const [tagInput, setTagInput] = useState("");
 
   const handleTagAdd = (tag: string) => {
@@ -168,7 +168,7 @@ export function FilterPanel({ filters, onChange }: FilterPanelProps) {
         {/* Selected tags */}
         {filters.tags && filters.tags.length > 0 && (
           <div className="flex flex-wrap gap-1 mb-2">
-            {filters.tags.map((tag) => (
+            {(filters.tags || []).map((tag) => (
               <span
                 key={tag}
                 className="inline-flex items-center gap-1 px-2 py-0.5 bg-accent/20 text-accent rounded text-xs"

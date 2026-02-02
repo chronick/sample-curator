@@ -111,9 +111,9 @@ export function TagEditor({ sample, selectedCount, onUpdate }: TagEditorProps) {
         </label>
 
         {/* Current tags */}
-        {selectedCount <= 1 && sample.tags.length > 0 && (
+        {selectedCount <= 1 && (sample.tags || []).length > 0 && (
           <div className="flex flex-wrap gap-1 mb-2">
-            {sample.tags.map((tag) => (
+            {(sample.tags || []).map((tag) => (
               <span
                 key={tag}
                 className="inline-flex items-center gap-1 px-2 py-0.5 bg-surface border border-surface-border rounded text-xs"
