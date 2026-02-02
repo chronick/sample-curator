@@ -1,0 +1,211 @@
+# Sample Curator
+
+Desktop application for managing your audio sample library. Browse, import, tag, and organize samples with waveform visualization and batch operations.
+
+## Features
+
+- Browse samples with waveform previews
+- Search by tags, BPM range, sample type, and quality score
+- Import samples with automatic analysis (BPM, key, quality metrics)
+- Batch tagging and organization
+- Pack management for vendor libraries
+- Duplicate detection via audio fingerprinting
+
+## Requirements
+
+- **Node.js** 18+
+- **Python** 3.11+
+- **uv** (Python package manager)
+- **Rust** (for Tauri builds)
+
+## Quick Start
+
+```bash
+# Install everything (npm + Python sidecar)
+npm run setup
+
+# Run the app
+npm start
+```
+
+That's it. The `setup` script installs both frontend and Python dependencies.
+
+## Installation (Manual)
+
+If you prefer step-by-step:
+
+### 1. Install Frontend Dependencies
+
+```bash
+npm install
+```
+
+### 2. Install Python Sidecar
+
+```bash
+npm run sidecar:sync
+```
+
+### 3. Run in Development Mode
+
+```bash
+npm start
+```
+
+This starts both the Vite dev server and Tauri app.
+
+## Usage
+
+### Importing Samples
+
+1. Click the **Import** button
+2. Select a folder containing audio files
+3. Configure import options:
+   - Recursive scan
+   - Auto-analyze (BPM, key, quality)
+   - Duplicate detection
+4. Click **Start Import**
+5. Monitor progress in the status bar
+
+### Browsing
+
+- Use the search bar to filter by text
+- Click tags in the sidebar to filter
+- Sort by BPM, date added, or quality score
+- Use keyboard shortcuts:
+  - `Space` - Play/pause selected sample
+  - `Enter` - Open sample details
+  - `⌘+A` - Select all
+  - `Delete` - Remove selected samples
+
+### Tagging
+
+- Right-click samples for context menu
+- Use bulk actions for multiple samples
+- Create new tags on the fly
+
+## Building for Production
+
+```bash
+npm run tauri:build
+```
+
+Output will be in `src-tauri/target/release/bundle/`.
+
+## Configuration
+
+The app stores data in `~/.music-hub-data/`:
+
+```
+~/.music-hub-data/
+├── sample-library/
+│   └── library.db      # SQLite database
+└── config.toml         # User preferences
+```
+
+## Python Sidecar
+
+The backend is a Python JSON-RPC server that handles:
+- Database operations
+- Audio file analysis
+- Waveform generation
+- Import pipeline
+
+### Monorepo Dependencies
+
+The sidecar depends on sibling packages in this monorepo:
+- `sample-library` - Database models, import pipeline, scoring
+- `sample-analysis` - BPM/key detection, quality metrics
+
+These are resolved via `[tool.uv.sources]` in `pyproject.toml` as editable path dependencies. When you run `uv sync`, uv automatically links them from `../../sample-library` and `../../sample-analysis`.
+
+### Running Standalone
+
+For debugging, run the sidecar directly:
+
+```bash
+cd sidecar
+uv run sample-curation-api
+```
+
+Send JSON-RPC requests via stdin:
+
+```bash
+echo '{"jsonrpc":"2.0","method":"list_tags","params":{},"id":1}' | uv run sample-curation-api
+```
+
+### Dependency Extras
+
+Install only what you need:
+
+```bash
+# Core functionality
+uv sync
+
+# With audio fingerprinting
+uv sync --extra fingerprint
+
+# With CLAP embeddings for similarity search
+uv sync --extra embedding
+
+# Everything
+uv sync --extra all
+```
+
+## Development
+
+### Project Structure
+
+```
+sample-curator/
+├── src/                     # React frontend
+├── src-tauri/               # Tauri (Rust) shell
+├── sidecar/                 # Python backend
+│   ├── pyproject.toml       # Python deps
+│   └── sample_curation_api/ # RPC handlers
+├── package.json             # Node deps
+└── CLAUDE.md                # Development guide
+```
+
+### Tech Stack
+
+| Layer | Technology |
+|-------|------------|
+| Desktop Shell | Tauri (Rust) |
+| Frontend | React 18, TypeScript, TailwindCSS |
+| State | Zustand |
+| Virtualization | @tanstack/react-virtual |
+| Backend | Python 3.11+, JSON-RPC over stdio |
+| Database | SQLite via SQLAlchemy |
+| Audio Analysis | librosa, soundfile |
+
+### Adding Features
+
+1. Check `CLAUDE.md` for architecture details
+2. Frontend changes go in `src/`
+3. Backend changes go in `sidecar/sample_curation_api/`
+4. Run `npm run typecheck` before committing
+
+## Troubleshooting
+
+### "Module not found" errors in sidecar
+
+```bash
+cd sidecar
+uv sync --extra all
+```
+
+### Tauri build fails
+
+Ensure Rust is installed:
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+### Database locked
+
+Close any other processes using the library (music-hub CLI, other curator instances).
+
+## License
+
+MIT
