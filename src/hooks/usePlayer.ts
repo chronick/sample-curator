@@ -1,130 +1,137 @@
 /**
- * Hook for audio playback.
+ * Hook for audio playback using native Rust backend.
  */
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { invoke } from "@tauri-apps/api/tauri";
 
 interface PlayerState {
   currentSample: string | null;
   isPlaying: boolean;
-  currentTime: number;
   duration: number;
 }
 
 export function usePlayer() {
-  const audioRef = useRef<HTMLAudioElement | null>(null);
   const [state, setState] = useState<PlayerState>({
     currentSample: null,
     isPlaying: false,
-    currentTime: 0,
     duration: 0,
   });
 
-  // Initialize audio element
-  useEffect(() => {
-    const audio = new Audio();
-    audio.preload = "metadata";
+  // Poll for playback status
+  const pollRef = useRef<number | null>(null);
 
-    audio.addEventListener("timeupdate", () => {
-      setState((s) => ({ ...s, currentTime: audio.currentTime }));
-    });
+  const startPolling = useCallback(() => {
+    if (pollRef.current) return;
 
-    audio.addEventListener("loadedmetadata", () => {
-      setState((s) => ({ ...s, duration: audio.duration }));
-    });
+    pollRef.current = window.setInterval(async () => {
+      try {
+        const [isPlaying, isPaused, duration] = await invoke<[boolean, boolean, number]>("audio_get_status");
 
-    audio.addEventListener("ended", () => {
-      setState((s) => ({ ...s, isPlaying: false, currentTime: 0 }));
-    });
-
-    audio.addEventListener("play", () => {
-      setState((s) => ({ ...s, isPlaying: true }));
-    });
-
-    audio.addEventListener("pause", () => {
-      setState((s) => ({ ...s, isPlaying: false }));
-    });
-
-    audioRef.current = audio;
-
-    return () => {
-      audio.pause();
-      audio.src = "";
-    };
+        // Stop polling if playback finished
+        if (!isPlaying && !isPaused) {
+          if (pollRef.current) {
+            window.clearInterval(pollRef.current);
+            pollRef.current = null;
+          }
+          setState((s) => ({ ...s, isPlaying: false }));
+        }
+      } catch (err) {
+        // Ignore errors during polling
+      }
+    }, 500); // Poll less frequently
   }, []);
+
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) {
+      window.clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }, []);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => stopPolling();
+  }, [stopPolling]);
 
   // Play a sample
   const play = useCallback(async (path: string) => {
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    // If same sample, just resume
-    if (state.currentSample === path) {
-      if (audio.paused) {
-        await audio.play();
-      }
-      return;
-    }
-
-    // Load and play new sample
-    // Convert path to file:// URL for local files
-    const url = path.startsWith("file://") ? path : `file://${path}`;
-    audio.src = url;
-    setState((s) => ({ ...s, currentSample: path, currentTime: 0 }));
+    console.log("Playing audio via Rust:", path);
+    setState((s) => ({ ...s, currentSample: path }));
 
     try {
-      await audio.play();
+      const duration = await invoke<number>("audio_play", { path });
+      console.log("Audio playing, duration:", duration);
+      setState((s) => ({ ...s, isPlaying: true, duration }));
+      startPolling();
     } catch (err) {
       console.error("Failed to play audio:", err);
+      setState((s) => ({ ...s, isPlaying: false }));
     }
-  }, [state.currentSample]);
+  }, [startPolling]);
 
   // Pause playback
-  const pause = useCallback(() => {
-    audioRef.current?.pause();
+  const pause = useCallback(async () => {
+    try {
+      await invoke("audio_pause");
+      setState((s) => ({ ...s, isPlaying: false }));
+    } catch (err) {
+      console.error("Failed to pause audio:", err);
+    }
   }, []);
+
+  // Resume playback
+  const resume = useCallback(async () => {
+    try {
+      await invoke("audio_resume");
+      setState((s) => ({ ...s, isPlaying: true }));
+      startPolling();
+    } catch (err) {
+      console.error("Failed to resume audio:", err);
+    }
+  }, [startPolling]);
 
   // Toggle play/pause
-  const toggle = useCallback(() => {
+  const toggle = useCallback(async () => {
     if (state.isPlaying) {
-      pause();
+      await pause();
     } else if (state.currentSample) {
-      play(state.currentSample);
+      await resume();
     }
-  }, [state.isPlaying, state.currentSample, play, pause]);
+  }, [state.isPlaying, state.currentSample, pause, resume]);
 
   // Stop playback
-  const stop = useCallback(() => {
-    const audio = audioRef.current;
-    if (audio) {
-      audio.pause();
-      audio.currentTime = 0;
-      setState((s) => ({ ...s, isPlaying: false, currentTime: 0 }));
+  const stop = useCallback(async () => {
+    try {
+      await invoke("audio_stop");
+      setState((s) => ({ ...s, isPlaying: false }));
+      stopPolling();
+    } catch (err) {
+      console.error("Failed to stop audio:", err);
     }
-  }, []);
+  }, [stopPolling]);
 
-  // Seek to position (0-1)
-  const seek = useCallback((position: number) => {
-    const audio = audioRef.current;
-    if (audio && audio.duration) {
-      audio.currentTime = position * audio.duration;
-    }
+  // Seek is not supported by rodio sink, so this is a no-op for now
+  const seek = useCallback((_position: number) => {
+    // rodio Sink doesn't support seeking - would need to reload the file
+    console.log("Seek not supported in native audio");
   }, []);
 
   // Set volume (0-1)
-  const setVolume = useCallback((volume: number) => {
-    const audio = audioRef.current;
-    if (audio) {
-      audio.volume = Math.max(0, Math.min(1, volume));
+  const setVolume = useCallback(async (volume: number) => {
+    try {
+      await invoke("audio_set_volume", { volume: Math.max(0, Math.min(1, volume)) });
+    } catch (err) {
+      console.error("Failed to set volume:", err);
     }
   }, []);
 
   return {
     currentSample: state.currentSample,
     isPlaying: state.isPlaying,
-    currentTime: state.currentTime,
+    currentTime: 0, // Not available with rodio sink
     duration: state.duration,
-    progress: state.duration > 0 ? state.currentTime / state.duration : 0,
+    progress: 0, // Not available with rodio sink
     play,
     pause,
     toggle,
