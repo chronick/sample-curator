@@ -1,25 +1,23 @@
 /**
  * Waveform visualization component.
  *
- * Supports two data sources:
- * - Native Rust (fast): Direct call to sample-analysis-core via Tauri
- * - Sidecar (slower): Python JSON-RPC call via sidecar
+ * Uses native Rust analysis via Tauri for fast waveform and spectrogram rendering.
  */
 
 import { useRef, useEffect, useState } from "react";
 import type { Sample, WaveformData, SpectrogramData } from "../api/types";
-import { api } from "../api";
-import { getNativeWaveform, getNativeSpectrogram } from "../hooks/useNativeAnalysis";
+import { getNativeSpectrogram, getNativeFrequencyWaveform } from "../hooks/useNativeAnalysis";
+import type { NativeFrequencyWaveformResponse } from "../hooks/useNativeAnalysis";
 
 type ViewMode = "waveform" | "spectrogram";
-type DataSource = "native" | "sidecar";
 
 // Simple in-memory cache for waveform and spectrogram data
 const waveformCache = new Map<string, WaveformData>();
 const spectrogramCache = new Map<string, SpectrogramData>();
+const frequencyWaveformCache = new Map<string, NativeFrequencyWaveformResponse>();
 
-function getCacheKey(path: string, width: number, height?: number, source?: string): string {
-  return `${source || "native"}:${path}:${width}${height ? `:${height}` : ""}`;
+function getCacheKey(path: string, width: number, height?: number, scale?: string): string {
+  return `${path}:${width}${height ? `:${height}` : ""}${scale ? `:${scale}` : ""}`;
 }
 
 interface WaveformViewProps {
@@ -28,17 +26,16 @@ interface WaveformViewProps {
   progress: number;
   onSeek: (position: number) => void;
   onPlay?: () => void;
-  /** Use native Rust analysis (fast) or Python sidecar (slower). Default: native */
-  useNative?: boolean;
 }
 
-export function WaveformView({ sample, isPlaying, progress, onSeek, onPlay, useNative = true }: WaveformViewProps) {
+export function WaveformView({ sample, isPlaying, progress, onSeek, onPlay }: WaveformViewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [waveform, setWaveform] = useState<WaveformData | null>(null);
   const [spectrogram, setSpectrogram] = useState<SpectrogramData | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("waveform");
-  const [dataSource, setDataSource] = useState<DataSource>(useNative ? "native" : "sidecar");
+  const [spectrogramScale, setSpectrogramScale] = useState<"mel" | "linear">("mel");
+  const [frequencyData, setFrequencyData] = useState<NativeFrequencyWaveformResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadTime, setLoadTime] = useState<number | null>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 150 });
@@ -69,13 +66,15 @@ export function WaveformView({ sample, isPlaying, progress, onSeek, onPlay, useN
     let cancelled = false;
 
     async function fetchWaveform() {
-      const cacheKey = getCacheKey(sample.path, canvasSize.width, undefined, dataSource);
+      const cacheKey = getCacheKey(sample.path, canvasSize.width);
 
       // Check cache first
       const cached = waveformCache.get(cacheKey);
-      if (cached) {
-        console.log(`[${dataSource}] Waveform cache hit`);
+      const cachedFreq = frequencyWaveformCache.get(cacheKey);
+      if (cached && cachedFreq) {
+        console.log("[Native] Waveform cache hit");
         setWaveform(cached);
+        setFrequencyData(cachedFreq);
         setLoadTime(0);
         setLoading(false);
         return;
@@ -86,31 +85,24 @@ export function WaveformView({ sample, isPlaying, progress, onSeek, onPlay, useN
       const startTime = performance.now();
 
       try {
-        let data: WaveformData;
-
-        if (dataSource === "native") {
-          // Use native Rust analyzer (fast)
-          console.log("[Native] Fetching waveform for:", sample.path, "width:", canvasSize.width);
-          const nativeResult = await getNativeWaveform(sample.path, canvasSize.width);
-          data = { peaks: nativeResult.data, duration: nativeResult.duration };
-        } else {
-          // Use Python sidecar (slower)
-          console.log("[Sidecar] Fetching waveform for sample:", sample.id, "width:", canvasSize.width);
-          data = await api.getWaveform(sample.id, canvasSize.width);
-        }
+        console.log("[Native] Fetching frequency waveform for:", sample.path, "width:", canvasSize.width);
+        const nativeResult = await getNativeFrequencyWaveform(sample.path, canvasSize.width);
+        const data: WaveformData = { peaks: nativeResult.peaks, duration: nativeResult.duration };
 
         const elapsed = performance.now() - startTime;
-        console.log(`[${dataSource}] Waveform loaded in ${elapsed.toFixed(1)}ms`);
+        console.log(`[Native] Frequency waveform loaded in ${elapsed.toFixed(1)}ms`);
 
         // Cache the result
         waveformCache.set(cacheKey, data);
+        frequencyWaveformCache.set(cacheKey, nativeResult);
 
         if (!cancelled) {
           setWaveform(data);
+          setFrequencyData(nativeResult);
           setLoadTime(elapsed);
         }
       } catch (err) {
-        console.error(`[${dataSource}] Failed to load waveform:`, err);
+        console.error("[Native] Failed to load frequency waveform:", err);
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -123,7 +115,7 @@ export function WaveformView({ sample, isPlaying, progress, onSeek, onPlay, useN
     return () => {
       cancelled = true;
     };
-  }, [sample.id, sample.path, canvasSize.width, dataSource]);
+  }, [sample.id, sample.path, canvasSize.width]);
 
   // Fetch spectrogram data when mode changes
   useEffect(() => {
@@ -132,12 +124,12 @@ export function WaveformView({ sample, isPlaying, progress, onSeek, onPlay, useN
     let cancelled = false;
 
     async function fetchSpectrogram() {
-      const cacheKey = getCacheKey(sample.path, canvasSize.width, canvasSize.height, dataSource);
+      const cacheKey = getCacheKey(sample.path, canvasSize.width, canvasSize.height, spectrogramScale);
 
       // Check cache first
       const cached = spectrogramCache.get(cacheKey);
       if (cached) {
-        console.log(`[${dataSource}] Spectrogram cache hit`);
+        console.log("[Native] Spectrogram cache hit");
         setSpectrogram(cached);
         setLoadTime(0);
         setLoading(false);
@@ -149,26 +141,17 @@ export function WaveformView({ sample, isPlaying, progress, onSeek, onPlay, useN
       const startTime = performance.now();
 
       try {
-        let data: SpectrogramData;
-
-        if (dataSource === "native") {
-          // Use native Rust analyzer (fast)
-          console.log("[Native] Fetching spectrogram for:", sample.path);
-          const nativeResult = await getNativeSpectrogram(sample.path, canvasSize.width, canvasSize.height);
-          data = {
-            spectrogram: nativeResult.spectrogram,
-            duration: nativeResult.duration,
-            width: nativeResult.width,
-            height: nativeResult.height,
-          };
-        } else {
-          // Use Python sidecar (slower)
-          console.log("[Sidecar] Fetching spectrogram for sample:", sample.id);
-          data = await api.getSpectrogram(sample.id, canvasSize.width, canvasSize.height);
-        }
+        console.log("[Native] Fetching spectrogram for:", sample.path, "scale:", spectrogramScale);
+        const nativeResult = await getNativeSpectrogram(sample.path, canvasSize.width, canvasSize.height, spectrogramScale);
+        const data: SpectrogramData = {
+          spectrogram: nativeResult.spectrogram,
+          duration: nativeResult.duration,
+          width: nativeResult.width,
+          height: nativeResult.height,
+        };
 
         const elapsed = performance.now() - startTime;
-        console.log(`[${dataSource}] Spectrogram loaded in ${elapsed.toFixed(1)}ms`);
+        console.log(`[Native] Spectrogram loaded in ${elapsed.toFixed(1)}ms`);
 
         // Cache the result
         spectrogramCache.set(cacheKey, data);
@@ -178,7 +161,7 @@ export function WaveformView({ sample, isPlaying, progress, onSeek, onPlay, useN
           setLoadTime(elapsed);
         }
       } catch (err) {
-        console.error(`[${dataSource}] Failed to load spectrogram:`, err);
+        console.error("[Native] Failed to load spectrogram:", err);
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -191,7 +174,7 @@ export function WaveformView({ sample, isPlaying, progress, onSeek, onPlay, useN
     return () => {
       cancelled = true;
     };
-  }, [sample.id, sample.path, viewMode, canvasSize.width, canvasSize.height, dataSource]);
+  }, [sample.id, sample.path, viewMode, canvasSize.width, canvasSize.height, spectrogramScale]);
 
   // Color mapping for spectrogram (value 0-1 to RGB)
   const valueToColor = (value: number): string => {
@@ -240,12 +223,30 @@ export function WaveformView({ sample, isPlaying, progress, onSeek, onPlay, useN
       ctx.lineTo(width, midY);
       ctx.stroke();
 
-      // Draw waveform bars
-      ctx.fillStyle = "#646cff";
-
+      // Draw waveform bars with frequency-based coloring
       for (let i = 0; i < peaks.length; i++) {
         const x = i * barWidth;
         const barHeight = Math.max(1, peaks[i] * midY * 0.9);
+
+        // Color based on spectral centroid
+        if (frequencyData && frequencyData.centroids[i] !== undefined) {
+          const centroid = frequencyData.centroids[i];
+          // Map frequency to HSL hue: low freq = warm (red/orange), high freq = cool (blue)
+          // <200Hz = red (0), 200-1000Hz = orange-yellow (30-60), 1000-4000Hz = cyan (180), >4000Hz = blue (240)
+          let hue: number;
+          if (centroid < 200) {
+            hue = 0; // red
+          } else if (centroid < 1000) {
+            hue = 30 + ((centroid - 200) / 800) * 30; // orange to yellow
+          } else if (centroid < 4000) {
+            hue = 60 + ((centroid - 1000) / 3000) * 120; // yellow to cyan
+          } else {
+            hue = 240; // blue
+          }
+          ctx.fillStyle = `hsl(${hue}, 80%, 55%)`;
+        } else {
+          ctx.fillStyle = "#646cff";
+        }
 
         // Draw symmetric bar
         ctx.fillRect(x, midY - barHeight, Math.max(1, barWidth - 1), barHeight * 2);
@@ -285,7 +286,7 @@ export function WaveformView({ sample, isPlaying, progress, onSeek, onPlay, useN
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(playX, 0, 2, height);
     }
-  }, [waveform, spectrogram, viewMode, isPlaying, progress, canvasSize]);
+  }, [waveform, spectrogram, frequencyData, viewMode, isPlaying, progress, canvasSize]);
 
   // Handle click to play and seek
   const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -319,31 +320,6 @@ export function WaveformView({ sample, isPlaying, progress, onSeek, onPlay, useN
           {sample.path.split("/").pop()}
         </span>
         <div className="flex items-center gap-2">
-          {/* Data source toggle */}
-          <div className="flex bg-surface border border-surface-border rounded overflow-hidden">
-            <button
-              onClick={() => setDataSource("native")}
-              className={`px-2 py-0.5 text-xs transition-colors ${
-                dataSource === "native"
-                  ? "bg-green-600 text-white"
-                  : "text-gray-400 hover:text-white"
-              }`}
-              title="Native Rust (fast)"
-            >
-              Native
-            </button>
-            <button
-              onClick={() => setDataSource("sidecar")}
-              className={`px-2 py-0.5 text-xs transition-colors ${
-                dataSource === "sidecar"
-                  ? "bg-yellow-600 text-white"
-                  : "text-gray-400 hover:text-white"
-              }`}
-              title="Python Sidecar (slower)"
-            >
-              Sidecar
-            </button>
-          </div>
           {/* View mode toggle */}
           <div className="flex bg-surface border border-surface-border rounded overflow-hidden">
             <button
@@ -367,6 +343,30 @@ export function WaveformView({ sample, isPlaying, progress, onSeek, onPlay, useN
               Spec
             </button>
           </div>
+          {viewMode === "spectrogram" && (
+            <div className="flex bg-surface border border-surface-border rounded overflow-hidden">
+              <button
+                onClick={() => setSpectrogramScale("mel")}
+                className={`px-2 py-0.5 text-xs transition-colors ${
+                  spectrogramScale === "mel"
+                    ? "bg-accent text-white"
+                    : "text-gray-400 hover:text-white"
+                }`}
+              >
+                Mel
+              </button>
+              <button
+                onClick={() => setSpectrogramScale("linear")}
+                className={`px-2 py-0.5 text-xs transition-colors ${
+                  spectrogramScale === "linear"
+                    ? "bg-accent text-white"
+                    : "text-gray-400 hover:text-white"
+                }`}
+              >
+                Lin
+              </button>
+            </div>
+          )}
           {/* Load time indicator */}
           {loadTime !== null && (
             <span className={`text-xs ${loadTime < 50 ? "text-green-400" : loadTime < 200 ? "text-yellow-400" : "text-red-400"}`}>
@@ -396,7 +396,7 @@ export function WaveformView({ sample, isPlaying, progress, onSeek, onPlay, useN
       </div>
 
       {/* Sample details */}
-      <div className="flex gap-4 mt-2 text-xs text-gray-400">
+      <div className="flex gap-4 mt-2 text-xs text-gray-400 overflow-hidden">
         {sample.bpm && <span>BPM: {Math.round(sample.bpm)}</span>}
         {sample.key && <span>Key: {sample.key}</span>}
         {sample.sample_rate && (

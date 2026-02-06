@@ -8,6 +8,4 @@ export {
   getNativeSpectrogram,
   getNativeQuality,
   getNativeAudioInfo,
-  benchmarkWaveform,
-  benchmarkSpectrogram,
 } from "./useNativeAnalysis";

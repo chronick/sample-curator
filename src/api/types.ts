@@ -60,13 +60,21 @@ export interface SearchFilters {
   pack_id?: number;
   min_score?: number;
   max_score?: number;
-  sample_type?: string;
   min_bpm?: number;
   max_bpm?: number;
   sort_field?: string;
   sort_direction?: "asc" | "desc";
   limit?: number;
   offset?: number;
+}
+
+export interface FilterPreset {
+  id: number;
+  name: string;
+  emoji: string | null;
+  filters_json: string;
+  is_system: boolean;
+  sort_order: number;
 }
 
 export interface SearchResult {
@@ -189,4 +197,13 @@ export interface ExportProjectInput {
   output_dir: string;
   naming_pattern?: string;
   copy_files?: boolean;
+}
+
+// ============ File Browser ============
+
+export interface DirectoryEntry {
+  name: string;
+  path: string;
+  is_directory: boolean;
+  sample_id: number | null;
 }

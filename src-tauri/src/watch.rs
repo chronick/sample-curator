@@ -46,6 +46,14 @@ impl Default for WatchState {
     }
 }
 
+impl WatchState {
+    /// Return a copy of all watched directory paths.
+    pub fn list_directories(&self) -> Result<Vec<String>, String> {
+        let dirs = self.watched_dirs.lock().map_err(|e| e.to_string())?;
+        Ok(dirs.clone())
+    }
+}
+
 /// Get the database path.
 fn get_db_path() -> Result<PathBuf, String> {
     let home = dirs::home_dir().ok_or("Could not find home directory")?;

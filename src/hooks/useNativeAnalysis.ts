@@ -1,8 +1,8 @@
 /**
- * Hook for native Rust audio analysis (bypasses Python sidecar for speed).
+ * Hook for native Rust audio analysis.
  *
  * These functions call directly into the Rust sample-analysis-core library
- * via Tauri commands, providing much faster analysis than the sidecar route.
+ * via Tauri commands for fast audio analysis.
  */
 
 import { useState, useCallback } from "react";
@@ -41,9 +41,14 @@ export interface NativeAudioInfoResponse {
   format: string;
 }
 
+export interface NativeFrequencyWaveformResponse {
+  peaks: number[];
+  centroids: number[];
+  duration: number;
+}
+
 /**
  * Get waveform data using native Rust analyzer.
- * Much faster than going through Python sidecar.
  */
 export async function getNativeWaveform(
   path: string,
@@ -54,14 +59,14 @@ export async function getNativeWaveform(
 
 /**
  * Get spectrogram data using native Rust analyzer.
- * Much faster than going through Python sidecar.
  */
 export async function getNativeSpectrogram(
   path: string,
   width: number = 800,
-  height: number = 128
+  height: number = 128,
+  scale?: "mel" | "linear"
 ): Promise<NativeSpectrogramResponse> {
-  return invoke<NativeSpectrogramResponse>("native_spectrogram", { path, width, height });
+  return invoke<NativeSpectrogramResponse>("native_spectrogram", { path, width, height, scale });
 }
 
 /**
@@ -76,6 +81,16 @@ export async function getNativeQuality(path: string): Promise<NativeQualityRespo
  */
 export async function getNativeAudioInfo(path: string): Promise<NativeAudioInfoResponse> {
   return invoke<NativeAudioInfoResponse>("native_audio_info", { path });
+}
+
+/**
+ * Get frequency-colored waveform data using native Rust analyzer.
+ */
+export async function getNativeFrequencyWaveform(
+  path: string,
+  width: number = 800
+): Promise<NativeFrequencyWaveformResponse> {
+  return invoke<NativeFrequencyWaveformResponse>("native_frequency_waveform", { path, width });
 }
 
 /**
@@ -194,84 +209,14 @@ export async function benchmark<T>(
   return { result, durationMs };
 }
 
-/**
- * Compare native vs sidecar performance for waveform generation.
- */
-export async function benchmarkWaveform(
-  path: string,
-  sampleId: number,
-  width: number = 800
-): Promise<{ native: number; sidecar: number; speedup: number }> {
-  const { api } = await import("../api");
-
-  // Warm up
-  await getNativeWaveform(path, width);
-  await api.getWaveform(sampleId, width);
-
-  // Benchmark native
-  const nativeStart = performance.now();
-  await getNativeWaveform(path, width);
-  const nativeTime = performance.now() - nativeStart;
-
-  // Benchmark sidecar
-  const sidecarStart = performance.now();
-  await api.getWaveform(sampleId, width);
-  const sidecarTime = performance.now() - sidecarStart;
-
-  const speedup = sidecarTime / nativeTime;
-
-  console.log(`[Waveform Benchmark]`);
-  console.log(`  Native:  ${nativeTime.toFixed(2)}ms`);
-  console.log(`  Sidecar: ${sidecarTime.toFixed(2)}ms`);
-  console.log(`  Speedup: ${speedup.toFixed(1)}x`);
-
-  return { native: nativeTime, sidecar: sidecarTime, speedup };
-}
-
-/**
- * Compare native vs sidecar performance for spectrogram generation.
- */
-export async function benchmarkSpectrogram(
-  path: string,
-  sampleId: number,
-  width: number = 800,
-  height: number = 128
-): Promise<{ native: number; sidecar: number; speedup: number }> {
-  const { api } = await import("../api");
-
-  // Warm up
-  await getNativeSpectrogram(path, width, height);
-  await api.getSpectrogram(sampleId, width, height);
-
-  // Benchmark native
-  const nativeStart = performance.now();
-  await getNativeSpectrogram(path, width, height);
-  const nativeTime = performance.now() - nativeStart;
-
-  // Benchmark sidecar
-  const sidecarStart = performance.now();
-  await api.getSpectrogram(sampleId, width, height);
-  const sidecarTime = performance.now() - sidecarStart;
-
-  const speedup = sidecarTime / nativeTime;
-
-  console.log(`[Spectrogram Benchmark]`);
-  console.log(`  Native:  ${nativeTime.toFixed(2)}ms`);
-  console.log(`  Sidecar: ${sidecarTime.toFixed(2)}ms`);
-  console.log(`  Speedup: ${speedup.toFixed(1)}x`);
-
-  return { native: nativeTime, sidecar: sidecarTime, speedup };
-}
-
 export default {
   getNativeWaveform,
   getNativeSpectrogram,
   getNativeQuality,
   getNativeAudioInfo,
+  getNativeFrequencyWaveform,
   useNativeWaveform,
   useNativeSpectrogram,
   useNativeQuality,
   benchmark,
-  benchmarkWaveform,
-  benchmarkSpectrogram,
 };

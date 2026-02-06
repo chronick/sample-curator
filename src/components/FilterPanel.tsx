@@ -133,32 +133,6 @@ export function FilterPanel({ filters, onChange }: FilterPanelProps) {
         </select>
       </div>
 
-      {/* Sample Type */}
-      <div>
-        <label className="block text-xs font-medium text-gray-400 mb-1">
-          Type
-        </label>
-        <select
-          value={filters.sample_type ?? ""}
-          onChange={(e) =>
-            onChange({ sample_type: e.target.value || undefined })
-          }
-          className="w-full px-3 py-1.5 bg-surface-raised border border-surface-border rounded text-sm focus:outline-none focus:border-accent"
-        >
-          <option value="">All Types</option>
-          <option value="kick">Kick</option>
-          <option value="snare">Snare</option>
-          <option value="hihat">Hi-Hat</option>
-          <option value="clap">Clap</option>
-          <option value="percussion">Percussion</option>
-          <option value="bass">Bass</option>
-          <option value="synth">Synth</option>
-          <option value="fx">FX</option>
-          <option value="vocal">Vocal</option>
-          <option value="loop">Loop</option>
-        </select>
-      </div>
-
       {/* Tags */}
       <div>
         <label className="block text-xs font-medium text-gray-400 mb-1">

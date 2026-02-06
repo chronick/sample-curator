@@ -52,7 +52,6 @@ describe('useStore', () => {
         pack_id: undefined,
         min_score: undefined,
         max_score: undefined,
-        sample_type: undefined,
         min_bpm: undefined,
         max_bpm: undefined,
         sort_field: undefined,
@@ -72,7 +71,6 @@ describe('useStore', () => {
           pack_id: undefined,
           min_score: undefined,
           max_score: undefined,
-          sample_type: undefined,
           min_bpm: undefined,
           max_bpm: undefined,
           sort_field: undefined,
@@ -153,18 +151,16 @@ describe('useStore', () => {
   });
 
   it('setFilters merges partial filters', () => {
-    useStore.getState().setFilters({ sample_type: 'kick', min_bpm: 120 });
+    useStore.getState().setFilters({ min_bpm: 120 });
     const filters = useStore.getState().filters;
-    expect(filters.sample_type).toBe('kick');
     expect(filters.min_bpm).toBe(120);
     expect(filters.limit).toBe(100); // unchanged
   });
 
   it('resetFilters restores defaults', () => {
-    useStore.getState().setFilters({ sample_type: 'kick', min_bpm: 120 });
+    useStore.getState().setFilters({ min_bpm: 120 });
     useStore.getState().resetFilters();
     const filters = useStore.getState().filters;
-    expect(filters.sample_type).toBeUndefined();
     expect(filters.min_bpm).toBeUndefined();
   });
 
@@ -220,7 +216,7 @@ describe('useStore', () => {
   });
 
   it('setActiveTab saves current tab filters before switching', () => {
-    useStore.getState().setFilters({ sample_type: 'kick' });
+    useStore.getState().setFilters({ min_bpm: 120 });
     useStore.getState().addTab({ label: 'New Tab' });
     const newTabId = useStore.getState().activeTabId;
 

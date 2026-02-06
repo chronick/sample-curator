@@ -11,6 +11,7 @@ import type {
   Pack,
   SearchFilters,
   SearchResult,
+  FilterPreset,
   ImportOptions,
   ImportProgress,
   WaveformData,
@@ -25,6 +26,7 @@ import type {
   CreateProjectInput,
   UpdateProjectInput,
   ExportProjectInput,
+  DirectoryEntry,
 } from "./types";
 
 // ============ JSON-RPC (kept for future ML sidecar use) ============
@@ -98,7 +100,7 @@ export const api = {
         pack_id: filters.pack_id ?? null,
         min_score: filters.min_score ?? null,
         max_score: filters.max_score ?? null,
-        sample_type: filters.sample_type || null,
+        sample_type: null,
         min_bpm: filters.min_bpm ?? null,
         max_bpm: filters.max_bpm ?? null,
         sort_field: filters.sort_field || null,
@@ -265,6 +267,30 @@ export const api = {
     }
   },
 
+  // ============ Filter Preset Commands (Native Rust) ============
+
+  async listFilterPresets(): Promise<FilterPreset[]> {
+    return invoke<FilterPreset[]>("db_list_filter_presets");
+  },
+
+  async createFilterPreset(name: string, filtersJson: string, emoji?: string): Promise<FilterPreset> {
+    return invoke<FilterPreset>("db_create_filter_preset", {
+      input: { name, emoji: emoji || null, filters_json: filtersJson },
+    });
+  },
+
+  async updateFilterPreset(id: number, input: { name?: string; emoji?: string; filters_json?: string; sort_order?: number }): Promise<void> {
+    return invoke<void>("db_update_filter_preset", { id, input });
+  },
+
+  async deleteFilterPreset(id: number): Promise<void> {
+    return invoke<void>("db_delete_filter_preset", { id });
+  },
+
+  async migrateTypesToTags(): Promise<number> {
+    return invoke<number>("db_migrate_types_to_tags");
+  },
+
   // ============ Similarity & Compatibility Search (Native Rust) ============
 
   /**
@@ -400,6 +426,16 @@ export const api = {
 
   async cleanupOldJobs(daysOld?: number): Promise<number> {
     return invoke<number>("cleanup_old_jobs", { daysOld });
+  },
+
+  // ============ File Browser Commands (Native Rust) ============
+
+  async listDirectory(path: string): Promise<DirectoryEntry[]> {
+    return invoke<DirectoryEntry[]>("list_directory", { path });
+  },
+
+  async getBrowseRoots(): Promise<string[]> {
+    return invoke<string[]>("get_browse_roots");
   },
 
   // ============ ML Sidecar Commands (Python, future use) ============

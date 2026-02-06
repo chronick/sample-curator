@@ -647,6 +647,257 @@ pub fn db_get_type_counts(state: State<'_, DbState>) -> Result<Vec<(String, i64)
     execute_type_counts(db)
 }
 
+// ============ Directory Browsing ============
+
+/// Entry in a directory listing (file or subdirectory).
+#[derive(Debug, Serialize, Clone)]
+pub struct DirectoryEntry {
+    pub name: String,
+    pub path: String,
+    pub is_directory: bool,
+    pub sample_id: Option<i64>,
+}
+
+/// List directory contents, returning subdirectories and audio files.
+/// Audio files are enriched with their sample ID from the database if present.
+#[tauri::command]
+pub fn list_directory(path: String, state: State<'_, DbState>) -> Result<Vec<DirectoryEntry>, String> {
+    let dir = std::path::Path::new(&path);
+    if !dir.is_dir() {
+        return Err(format!("Not a directory: {}", path));
+    }
+
+    let audio_extensions = ["wav", "aif", "aiff", "flac", "mp3", "ogg", "m4a"];
+
+    let mut entries: Vec<DirectoryEntry> = Vec::new();
+
+    let read_dir = std::fs::read_dir(dir).map_err(|e| e.to_string())?;
+
+    for entry in read_dir {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let file_name = entry.file_name().to_string_lossy().to_string();
+
+        // Skip hidden files
+        if file_name.starts_with('.') {
+            continue;
+        }
+
+        let file_path = entry.path();
+        let is_dir = file_path.is_dir();
+
+        if is_dir {
+            entries.push(DirectoryEntry {
+                name: file_name,
+                path: file_path.to_string_lossy().to_string(),
+                is_directory: true,
+                sample_id: None,
+            });
+        } else {
+            // Check if audio file
+            let ext = file_path.extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            if audio_extensions.contains(&ext.as_str()) {
+                entries.push(DirectoryEntry {
+                    name: file_name,
+                    path: file_path.to_string_lossy().to_string(),
+                    is_directory: false,
+                    sample_id: None,
+                });
+            }
+        }
+    }
+
+    // Sort: directories first (alphabetical), then files (alphabetical)
+    entries.sort_by(|a, b| {
+        match (a.is_directory, b.is_directory) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+        }
+    });
+
+    // Batch lookup sample_ids from DB for audio files
+    let db_guard = state.get_db()?;
+    let db = db_guard.as_ref().ok_or("Database not initialized")?;
+    let conn = db.connection();
+
+    let file_paths: Vec<&str> = entries.iter()
+        .filter(|e| !e.is_directory)
+        .map(|e| e.path.as_str())
+        .collect();
+
+    if !file_paths.is_empty() {
+        // Build a query to look up all paths at once
+        let placeholders: Vec<String> = file_paths.iter().enumerate().map(|(i, _)| format!("?{}", i + 1)).collect();
+        let sql = format!("SELECT id, path FROM samples WHERE path IN ({})", placeholders.join(", "));
+
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+
+        let params: Vec<&dyn rusqlite::types::ToSql> = file_paths.iter().map(|p| p as &dyn rusqlite::types::ToSql).collect();
+
+        let rows = stmt.query_map(params.as_slice(), |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        }).map_err(|e| e.to_string())?;
+
+        let mut path_to_id: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+        for row in rows {
+            if let Ok((id, path)) = row {
+                path_to_id.insert(path, id);
+            }
+        }
+
+        // Update entries with sample_ids
+        for entry in entries.iter_mut() {
+            if !entry.is_directory {
+                entry.sample_id = path_to_id.get(&entry.path).copied();
+            }
+        }
+    }
+
+    Ok(entries)
+}
+
+/// Get the root directories from the watch state (watched directories).
+#[tauri::command]
+pub fn get_browse_roots(state: State<'_, crate::watch::WatchState>) -> Result<Vec<String>, String> {
+    state.list_directories()
+}
+
+// ============ Filter Preset Types & Commands ============
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct FilterPreset {
+    pub id: i64,
+    pub name: String,
+    pub emoji: Option<String>,
+    pub filters_json: String,
+    pub is_system: bool,
+    pub sort_order: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateFilterPresetInput {
+    pub name: String,
+    pub emoji: Option<String>,
+    pub filters_json: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateFilterPresetInput {
+    pub name: Option<String>,
+    pub emoji: Option<String>,
+    pub filters_json: Option<String>,
+    pub sort_order: Option<i64>,
+}
+
+#[tauri::command]
+pub fn db_list_filter_presets(state: State<'_, DbState>) -> Result<Vec<FilterPreset>, String> {
+    let db_guard = state.get_db()?;
+    let db = db_guard.as_ref().ok_or("Database not initialized")?;
+    let conn = db.connection();
+    let mut stmt = conn.prepare(
+        "SELECT id, name, emoji, filters_json, is_system, sort_order FROM filter_presets ORDER BY sort_order, name"
+    ).map_err(|e| e.to_string())?;
+
+    let presets = stmt.query_map([], |row| {
+        Ok(FilterPreset {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            emoji: row.get(2)?,
+            filters_json: row.get(3)?,
+            is_system: row.get::<_, i64>(4)? != 0,
+            sort_order: row.get(5)?,
+        })
+    }).map_err(|e| e.to_string())?
+    .filter_map(|r| r.ok())
+    .collect();
+
+    Ok(presets)
+}
+
+#[tauri::command]
+pub fn db_create_filter_preset(input: CreateFilterPresetInput, state: State<'_, DbState>) -> Result<FilterPreset, String> {
+    let db_guard = state.get_db()?;
+    let db = db_guard.as_ref().ok_or("Database not initialized")?;
+    let conn = db.connection();
+    conn.execute(
+        "INSERT INTO filter_presets (name, emoji, filters_json) VALUES (?1, ?2, ?3)",
+        rusqlite::params![input.name, input.emoji, input.filters_json],
+    ).map_err(|e| e.to_string())?;
+
+    let id = conn.last_insert_rowid();
+    Ok(FilterPreset {
+        id,
+        name: input.name,
+        emoji: input.emoji,
+        filters_json: input.filters_json,
+        is_system: false,
+        sort_order: 0,
+    })
+}
+
+#[tauri::command]
+pub fn db_update_filter_preset(id: i64, input: UpdateFilterPresetInput, state: State<'_, DbState>) -> Result<(), String> {
+    let db_guard = state.get_db()?;
+    let db = db_guard.as_ref().ok_or("Database not initialized")?;
+    let conn = db.connection();
+    let mut updates = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+    if let Some(ref name) = input.name {
+        updates.push(format!("name = ?{}", params.len() + 1));
+        params.push(Box::new(name.clone()));
+    }
+    if let Some(ref emoji) = input.emoji {
+        updates.push(format!("emoji = ?{}", params.len() + 1));
+        params.push(Box::new(emoji.clone()));
+    }
+    if let Some(ref filters_json) = input.filters_json {
+        updates.push(format!("filters_json = ?{}", params.len() + 1));
+        params.push(Box::new(filters_json.clone()));
+    }
+    if let Some(sort_order) = input.sort_order {
+        updates.push(format!("sort_order = ?{}", params.len() + 1));
+        params.push(Box::new(sort_order));
+    }
+
+    if updates.is_empty() {
+        return Ok(());
+    }
+
+    params.push(Box::new(id));
+    let sql = format!(
+        "UPDATE filter_presets SET {} WHERE id = ?{}",
+        updates.join(", "),
+        params.len()
+    );
+
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    conn.execute(&sql, param_refs.as_slice()).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn db_delete_filter_preset(id: i64, state: State<'_, DbState>) -> Result<(), String> {
+    let db_guard = state.get_db()?;
+    let db = db_guard.as_ref().ok_or("Database not initialized")?;
+    let conn = db.connection();
+    conn.execute(
+        "DELETE FROM filter_presets WHERE id = ?1 AND is_system = 0",
+        [id],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn db_migrate_types_to_tags(state: State<'_, DbState>) -> Result<usize, String> {
+    let db_guard = state.get_db()?;
+    let db = db_guard.as_ref().ok_or("Database not initialized")?;
+    db.migrate_types_to_tags().map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

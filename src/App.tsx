@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, Component, ErrorInfo, ReactNode } from "react";
 import { SampleBrowser } from "./components/SampleBrowser";
 import { SampleGrid } from "./components/SampleGrid";
-import { FilterPanel } from "./components/FilterPanel";
+import { FileBrowser } from "./components/FileBrowser";
 import { WaveformView } from "./components/WaveformView";
 import { ImportDialog } from "./components/ImportDialog";
+import { SettingsDialog } from "./components/SettingsDialog";
 import { TagEditor } from "./components/TagEditor";
 import { SimilarityPanel } from "./components/SimilarityPanel";
 import { ProjectsPanel } from "./components/ProjectsPanel";
@@ -11,12 +12,11 @@ import { DuplicatesPanel } from "./components/DuplicatesPanel";
 import { QueryBar } from "./components/QueryBar";
 import { FilterBreadcrumbs } from "./components/FilterBreadcrumbs";
 import { TabBar } from "./components/TabBar";
-import { PackTree } from "./components/PackTree";
 import { AcousticBadges } from "./components/AcousticBadges";
 import { useLibrary } from "./hooks/useLibrary";
+import { useStore } from "./store";
 import { usePlayer } from "./hooks/usePlayer";
 import { api, JobStatusResponse } from "./api/client";
-import { getTypeEmoji } from "./utils/emoji";
 import type { Sample, SearchFilters } from "./api/types";
 
 // Error boundary to catch render errors
@@ -53,6 +53,7 @@ type RightPanelMode = "details" | "similar" | "projects" | "duplicates";
 
 function AppContent() {
   const [showImport, setShowImport] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
   const [rightPanelMode, setRightPanelMode] = useState<RightPanelMode>("details");
   const [jobStatus, setJobStatus] = useState<JobStatusResponse | null>(null);
@@ -90,7 +91,6 @@ function AppContent() {
     loading,
     packs,
     allTags,
-    typeCounts,
     sortField,
     sortDirection,
     viewMode,
@@ -140,9 +140,6 @@ function AppContent() {
     (key: string, value?: string) => {
       const update: Partial<SearchFilters> = {};
       switch (key) {
-        case "sample_type":
-          update.sample_type = undefined;
-          break;
         case "min_bpm":
           update.min_bpm = undefined;
           break;
@@ -323,6 +320,17 @@ function AppContent() {
       <header className="flex items-center justify-between px-4 py-2 border-b border-surface-border bg-surface-raised">
         <h1 className="text-lg font-semibold">Sample Curator</h1>
         <div className="flex items-center gap-2">
+          {/* Settings */}
+          <button
+            onClick={() => setShowSettings(true)}
+            className="px-2 py-1.5 bg-surface hover:bg-surface-hover border border-surface-border rounded text-sm transition-colors"
+            title="Settings"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </button>
           {/* View mode toggle */}
           <button
             onClick={() => setViewMode(viewMode === "list" ? "grid" : "list")}
@@ -374,26 +382,16 @@ function AppContent() {
 
       {/* Main content */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Left sidebar: PackTree + FilterPanel */}
+        {/* Left sidebar: File Browser */}
         <aside className="w-64 border-r border-surface-border bg-surface overflow-y-auto flex flex-col">
-          <PackTree
-            packs={packs}
-            typeCounts={typeCounts}
-            totalSamples={totalSamples}
-            activeFilter={{
-              type: filters.sample_type || undefined,
-              packId: filters.pack_id || undefined,
-            }}
-            onFilterByType={(type) => setFilters({ sample_type: type || undefined })}
-            onFilterByPack={(packId) => setFilters({ pack_id: packId || undefined })}
+          <FileBrowser
+            onSelectSample={handleSelectSampleById}
+            onPlayFile={(path) => play(path)}
           />
-          <div className="border-t border-surface-border">
-            <FilterPanel filters={filters} onChange={setFilters} />
-          </div>
         </aside>
 
         {/* Sample browser / grid */}
-        <main className="flex-1 flex flex-col overflow-hidden">
+        <main className="flex-1 min-w-0 flex flex-col overflow-hidden">
           {viewMode === "list" ? (
             <SampleBrowser
               samples={samples}
@@ -419,8 +417,8 @@ function AppContent() {
 
           {/* Waveform and details */}
           {selectedSample && (
-            <div className="h-72 border-t border-surface-border bg-surface-raised flex">
-              <div className="flex-1 p-4">
+            <div className="h-72 border-t border-surface-border bg-surface-raised flex overflow-hidden">
+              <div className="flex-1 min-w-0 p-4">
                 <WaveformView
                   sample={selectedSample}
                   isPlaying={isPlaying && currentSample === selectedSample.path}
@@ -481,7 +479,9 @@ function AppContent() {
           {/* Panel content */}
           <div className="flex-1 overflow-hidden">
             {rightPanelMode === "details" && selectedSample && (
-              <SampleDetails sample={selectedSample} acousticTags={acousticTags} />
+              <SampleDetails sample={selectedSample} acousticTags={acousticTags} onUpdate={(updated) => {
+                useStore.getState().updateSample(updated);
+              }} />
             )}
             {rightPanelMode === "similar" && (
               <SimilarityPanel
@@ -538,12 +538,156 @@ function AppContent() {
           }}
         />
       )}
+
+      {/* Settings dialog */}
+      {showSettings && (
+        <SettingsDialog onClose={() => setShowSettings(false)} />
+      )}
     </div>
   );
 }
 
-function SampleDetails({ sample, acousticTags }: { sample: Sample; acousticTags: string[] }) {
-  const emoji = getTypeEmoji(sample.sample_type);
+function SampleDetails({ sample, acousticTags, onUpdate }: { sample: Sample; acousticTags: string[]; onUpdate: (sample: Sample) => void }) {
+  const [editingField, setEditingField] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
+  const [newTag, setNewTag] = useState("");
+  const [tagSuggestions, setTagSuggestions] = useState<string[]>([]);
+  const [allTags, setAllTags] = useState<string[]>([]);
+
+  // Load all tags for autocomplete
+  useEffect(() => {
+    api.listTags().then(setAllTags).catch(() => {});
+  }, []);
+
+  const startEdit = (field: string, currentValue: string) => {
+    setEditingField(field);
+    setEditValue(currentValue);
+  };
+
+  const saveEdit = async () => {
+    if (!editingField) return;
+    try {
+      const updates: Partial<Sample> = {};
+      switch (editingField) {
+        case "bpm":
+          updates.bpm = editValue ? parseFloat(editValue) : null;
+          break;
+        case "key":
+          updates.key = editValue || null;
+          break;
+      }
+      const updated = await api.updateSample(sample.id, updates);
+      onUpdate(updated);
+    } catch (err) {
+      console.error("Failed to update sample:", err);
+    }
+    setEditingField(null);
+  };
+
+  const cancelEdit = () => {
+    setEditingField(null);
+    setEditValue("");
+  };
+
+  const handleEditKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      saveEdit();
+    } else if (e.key === "Escape") {
+      cancelEdit();
+    }
+  };
+
+  const handleAddTag = async () => {
+    const tag = newTag.trim().toLowerCase();
+    if (!tag || (sample.tags || []).includes(tag)) {
+      setNewTag("");
+      return;
+    }
+    try {
+      const updated = await api.addTags(sample.id, [tag]);
+      onUpdate(updated);
+      setNewTag("");
+    } catch (err) {
+      console.error("Failed to add tag:", err);
+    }
+  };
+
+  const handleRemoveTag = async (tag: string) => {
+    try {
+      const updated = await api.removeTags(sample.id, [tag]);
+      onUpdate(updated);
+    } catch (err) {
+      console.error("Failed to remove tag:", err);
+    }
+  };
+
+  const handleTagInputChange = (value: string) => {
+    setNewTag(value);
+    if (value.length > 0) {
+      const filtered = allTags
+        .filter((t) => t.toLowerCase().startsWith(value.toLowerCase()))
+        .filter((t) => !(sample.tags || []).includes(t))
+        .slice(0, 5);
+      setTagSuggestions(filtered);
+    } else {
+      setTagSuggestions([]);
+    }
+  };
+
+  const handleTagKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (tagSuggestions.length > 0) {
+        setNewTag(tagSuggestions[0]);
+        setTagSuggestions([]);
+        // Add it directly
+        const tag = tagSuggestions[0].trim().toLowerCase();
+        if (tag && !(sample.tags || []).includes(tag)) {
+          api.addTags(sample.id, [tag]).then(onUpdate).catch(console.error);
+          setNewTag("");
+        }
+      } else {
+        handleAddTag();
+      }
+    } else if (e.key === "Escape") {
+      setNewTag("");
+      setTagSuggestions([]);
+    }
+  };
+
+  const renderEditableField = (label: string, field: string, value: string | number | null, suffix?: string) => {
+    const displayValue = value !== null && value !== undefined ? String(value) : "";
+    const isEditing = editingField === field;
+
+    return (
+      <div>
+        <div className="text-xs text-gray-400">{label}</div>
+        {isEditing ? (
+          <div className="flex items-center gap-1">
+            <input
+              type={field === "bpm" ? "number" : "text"}
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              onKeyDown={handleEditKeyDown}
+              onBlur={saveEdit}
+              autoFocus
+              className="w-full px-1 py-0.5 text-sm bg-surface border border-accent rounded focus:outline-none"
+            />
+          </div>
+        ) : (
+          <div
+            className="text-sm cursor-pointer hover:text-accent transition-colors group"
+            onClick={() => startEdit(field, displayValue)}
+            title="Click to edit"
+          >
+            {displayValue ? `${field === "bpm" ? Math.round(Number(displayValue)) : displayValue}${suffix || ""}` : "-"}
+            <span className="ml-1 opacity-0 group-hover:opacity-50 text-xs">&#9998;</span>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="p-4 space-y-4 overflow-y-auto h-full">
@@ -555,31 +699,12 @@ function SampleDetails({ sample, acousticTags }: { sample: Sample; acousticTags:
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        {sample.bpm && (
-          <div>
-            <div className="text-xs text-gray-400">BPM</div>
-            <div className="text-sm">{Math.round(sample.bpm)}</div>
-          </div>
-        )}
-        {sample.key && (
-          <div>
-            <div className="text-xs text-gray-400">Key</div>
-            <div className="text-sm">{sample.key}</div>
-          </div>
-        )}
+        {renderEditableField("BPM", "bpm", sample.bpm)}
+        {renderEditableField("Key", "key", sample.key)}
         {sample.duration && (
           <div>
             <div className="text-xs text-gray-400">Duration</div>
             <div className="text-sm">{sample.duration.toFixed(2)}s</div>
-          </div>
-        )}
-        {sample.sample_type && (
-          <div>
-            <div className="text-xs text-gray-400">Type</div>
-            <div className="text-sm">
-              {emoji && <span className="mr-1">{emoji}</span>}
-              {sample.sample_type}
-            </div>
           </div>
         )}
       </div>
@@ -636,22 +761,56 @@ function SampleDetails({ sample, acousticTags }: { sample: Sample; acousticTags:
         </div>
       )}
 
-      {/* Tags */}
-      {sample.tags && sample.tags.length > 0 && (
-        <div>
-          <div className="text-xs text-gray-400 mb-2">Tags</div>
-          <div className="flex flex-wrap gap-1">
-            {sample.tags.map((tag) => (
-              <span
-                key={tag}
-                className="px-2 py-0.5 text-xs bg-gray-700 rounded"
+      {/* Editable Tags */}
+      <div>
+        <div className="text-xs text-gray-400 mb-2">Tags</div>
+        <div className="flex flex-wrap gap-1 mb-2">
+          {(sample.tags || []).map((tag) => (
+            <span
+              key={tag}
+              className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-gray-700 rounded group"
+            >
+              {tag}
+              <button
+                onClick={() => handleRemoveTag(tag)}
+                className="text-gray-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
               >
-                {tag}
-              </span>
-            ))}
-          </div>
+                &times;
+              </button>
+            </span>
+          ))}
         </div>
-      )}
+        <div className="relative">
+          <input
+            type="text"
+            value={newTag}
+            onChange={(e) => handleTagInputChange(e.target.value)}
+            onKeyDown={handleTagKeyDown}
+            placeholder="Add tag..."
+            className="w-full px-2 py-1 text-xs bg-surface border border-surface-border rounded focus:outline-none focus:border-accent"
+          />
+          {tagSuggestions.length > 0 && (
+            <div className="absolute z-10 w-full mt-1 bg-surface-raised border border-surface-border rounded shadow-lg">
+              {tagSuggestions.map((suggestion) => (
+                <button
+                  key={suggestion}
+                  className="w-full px-2 py-1 text-xs text-left hover:bg-surface-hover"
+                  onClick={() => {
+                    const tag = suggestion.trim().toLowerCase();
+                    if (tag && !(sample.tags || []).includes(tag)) {
+                      api.addTags(sample.id, [tag]).then(onUpdate).catch(console.error);
+                    }
+                    setNewTag("");
+                    setTagSuggestions([]);
+                  }}
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

@@ -126,6 +126,13 @@ fn main() {
             db_commands::db_batch_delete,
             db_commands::db_batch_add_tags,
             db_commands::db_get_type_counts,
+            db_commands::db_list_filter_presets,
+            db_commands::db_create_filter_preset,
+            db_commands::db_update_filter_preset,
+            db_commands::db_delete_filter_preset,
+            db_commands::db_migrate_types_to_tags,
+            db_commands::list_directory,
+            db_commands::get_browse_roots,
             // Import pipeline
             import_commands::import_start,
             import_commands::import_progress,
@@ -141,6 +148,7 @@ fn main() {
             analysis::native_waveform,
             analysis::native_quality,
             analysis::native_audio_info,
+            analysis::native_frequency_waveform,
             // Similarity and compatibility search
             search::find_similar,
             search::find_compatible,

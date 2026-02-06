@@ -83,7 +83,6 @@ const defaultFilters: SearchFilters = {
   pack_id: undefined,
   min_score: undefined,
   max_score: undefined,
-  sample_type: undefined,
   min_bpm: undefined,
   max_bpm: undefined,
   sort_field: undefined,

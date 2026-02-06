@@ -19,20 +19,7 @@ interface QueryBarProps {
   packs: Pack[];
 }
 
-const FIELD_NAMES = ["type", "bpm", "tag", "pack", "score", "key"] as const;
-
-const SAMPLE_TYPES = [
-  "kick",
-  "snare",
-  "hihat",
-  "clap",
-  "percussion",
-  "bass",
-  "synth",
-  "fx",
-  "vocal",
-  "loop",
-];
+const FIELD_NAMES = ["bpm", "tag", "pack", "score", "key"] as const;
 
 /**
  * Split input by spaces while respecting quoted strings.
@@ -104,10 +91,6 @@ export function parseQuery(input: string): Partial<SearchFilters> {
     const value = unquote(rawValue);
 
     switch (field) {
-      case "type":
-        filters.sample_type = value;
-        break;
-
       case "bpm": {
         if (value.startsWith(">")) {
           filters.min_bpm = Number(value.slice(1));
@@ -179,7 +162,6 @@ export function QueryBar({
   useEffect(() => {
     const parts: string[] = [];
 
-    if (filters.sample_type) parts.push(`type:${filters.sample_type}`);
     if (filters.min_bpm != null && filters.max_bpm != null) {
       parts.push(`bpm:${filters.min_bpm}-${filters.max_bpm}`);
     } else if (filters.min_bpm != null) {
@@ -215,10 +197,6 @@ export function QueryBar({
       const partial = cursorWord.slice(colonIndex + 1).toLowerCase();
 
       switch (field) {
-        case "type":
-          return SAMPLE_TYPES.filter((t) => t.startsWith(partial)).map(
-            (t) => ({ label: `type:${t}`, value: `type:${t}` })
-          );
         case "tag":
           return allTags
             .filter((t) => t.toLowerCase().startsWith(partial))

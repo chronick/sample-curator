@@ -6,7 +6,7 @@ import { useRef, useCallback } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { Sample } from "../api/types";
 import { ScoreIndicator } from "./ScoreIndicator";
-import { getTypeEmoji } from "../utils/emoji";
+import { getTagEmoji } from "../utils/emoji";
 
 interface SortConfig {
   field: string;
@@ -30,7 +30,6 @@ const SORTABLE_COLUMNS: Array<{ key: string; label: string; className: string; a
   { key: "applicability_score", label: "Score", className: "w-20 px-2 py-2 text-right", align: "right" },
   { key: "bpm", label: "BPM", className: "w-16 px-2 py-2 text-right", align: "right" },
   { key: "key", label: "Key", className: "w-16 px-2 py-2" },
-  { key: "sample_type", label: "Type", className: "w-24 px-2 py-2" },
 ];
 
 function SortIndicator({ field, sortConfig }: { field: string; sortConfig?: SortConfig }) {
@@ -143,7 +142,7 @@ export function SampleBrowser({
               <SortIndicator field={col.key} sortConfig={sortConfig} />
             </div>
           ))}
-          <div className="w-32 px-2 py-2">Tags</div>
+          <div className="w-48 px-2 py-2">Tags</div>
         </div>
 
         {/* Rows */}
@@ -151,8 +150,6 @@ export function SampleBrowser({
           const sample = samples[virtualItem.index];
           const isSelected = selectedSample?.id === sample.id;
           const isChecked = selectedIds.has(sample.id);
-          const emoji = getTypeEmoji(sample.sample_type);
-
           return (
             <div
               key={sample.id}
@@ -193,19 +190,19 @@ export function SampleBrowser({
               <div className="w-16 px-2 text-sm text-gray-400">
                 {sample.key || "-"}
               </div>
-              <div className="w-24 px-2 text-sm text-gray-400 truncate">
-                {emoji && <span className="mr-1">{emoji}</span>}
-                {sample.sample_type || "-"}
-              </div>
-              <div className="w-32 px-2 flex gap-1 overflow-hidden">
-                {(sample.tags || []).slice(0, 3).map((tag) => (
-                  <span
-                    key={tag}
-                    className="px-1.5 py-0.5 bg-surface-border rounded text-xs truncate"
-                  >
-                    {tag}
-                  </span>
-                ))}
+              <div className="w-48 px-2 flex gap-1 overflow-hidden">
+                {(sample.tags || []).slice(0, 3).map((tag) => {
+                  const emoji = getTagEmoji(tag);
+                  return (
+                    <span
+                      key={tag}
+                      className="px-1.5 py-0.5 bg-surface-border rounded text-xs truncate"
+                    >
+                      {emoji && <span className="mr-0.5">{emoji}</span>}
+                      {tag}
+                    </span>
+                  );
+                })}
                 {(sample.tags || []).length > 3 && (
                   <span className="text-xs text-gray-500">
                     +{sample.tags.length - 3}

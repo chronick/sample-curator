@@ -17,11 +17,6 @@ describe('parseQuery', () => {
     expect(result.query).toBe('dark kick');
   });
 
-  it('parses type filter', () => {
-    const result = parseQuery('type:kick');
-    expect(result.sample_type).toBe('kick');
-  });
-
   it('parses bpm min', () => {
     const result = parseQuery('bpm:>120');
     expect(result.min_bpm).toBe(120);
@@ -69,8 +64,7 @@ describe('parseQuery', () => {
   });
 
   it('parses combined filters', () => {
-    const result = parseQuery('type:kick bpm:>120 tag:dark bright');
-    expect(result.sample_type).toBe('kick');
+    const result = parseQuery('bpm:>120 tag:dark bright');
     expect(result.min_bpm).toBe(120);
     expect(result.tags).toEqual(['dark']);
     expect(result.query).toBe('bright');

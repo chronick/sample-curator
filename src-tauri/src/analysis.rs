@@ -6,7 +6,7 @@
 use sample_analysis_core::{
     analyzers::{
         quality::{analyze_quality, QualityConfig},
-        spectrogram::{analyze_spectrogram, generate_waveform, SpectrogramConfig},
+        spectrogram::{analyze_spectrogram, generate_waveform, generate_frequency_waveform, SpectrogramConfig, SpectrogramScale},
     },
     audio::{get_audio_info, load_audio},
 };
@@ -63,15 +63,22 @@ pub fn native_spectrogram(
     path: String,
     width: Option<usize>,
     height: Option<usize>,
+    scale: Option<String>,
 ) -> Result<SpectrogramResponse, String> {
     let width = width.unwrap_or(800);
     let height = height.unwrap_or(128);
 
     let (samples, sr) = load_audio(&path, None, true).map_err(|e| e.to_string())?;
 
+    let spec_scale = match scale.as_deref() {
+        Some("linear") => SpectrogramScale::Linear,
+        _ => SpectrogramScale::Mel,
+    };
+
     let config = SpectrogramConfig {
         width,
         height,
+        scale: spec_scale,
         ..Default::default()
     };
 
@@ -132,5 +139,33 @@ pub fn native_audio_info(path: String) -> Result<AudioInfoResponse, String> {
         channels: info.channels,
         bit_depth: info.bit_depth,
         format: info.format,
+    })
+}
+
+/// Frequency waveform result for frontend.
+#[derive(Serialize)]
+pub struct FrequencyWaveformResponse {
+    /// Peak values at evenly spaced intervals
+    pub peaks: Vec<f64>,
+    /// Spectral centroid frequency (Hz) at each position
+    pub centroids: Vec<f64>,
+    /// Audio duration in seconds
+    pub duration: f64,
+}
+
+/// Generate frequency-colored waveform data (native, no sidecar).
+#[tauri::command]
+pub fn native_frequency_waveform(path: String, width: Option<usize>) -> Result<FrequencyWaveformResponse, String> {
+    let width = width.unwrap_or(800);
+
+    let (samples, sr) = load_audio(&path, None, true).map_err(|e| e.to_string())?;
+
+    let (peaks, centroids) = generate_frequency_waveform(&samples, sr, width);
+    let duration = samples.len() as f64 / sr as f64;
+
+    Ok(FrequencyWaveformResponse {
+        peaks: peaks.into_iter().map(|x| x as f64).collect(),
+        centroids: centroids.into_iter().map(|x| x as f64).collect(),
+        duration,
     })
 }

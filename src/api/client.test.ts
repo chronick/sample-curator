@@ -16,7 +16,6 @@ describe('api client', () => {
     await api.search({
       query: 'kick',
       tags: ['dark'],
-      sample_type: 'kick',
       min_bpm: 120,
       max_bpm: 160,
       limit: 50,
@@ -30,7 +29,7 @@ describe('api client', () => {
         pack_id: null,
         min_score: null,
         max_score: null,
-        sample_type: 'kick',
+        sample_type: null,
         min_bpm: 120,
         max_bpm: 160,
         sort_field: null,
