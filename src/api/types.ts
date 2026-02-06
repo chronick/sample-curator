@@ -63,6 +63,8 @@ export interface SearchFilters {
   sample_type?: string;
   min_bpm?: number;
   max_bpm?: number;
+  sort_field?: string;
+  sort_direction?: "asc" | "desc";
   limit?: number;
   offset?: number;
 }

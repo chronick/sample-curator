@@ -7,3 +7,6 @@ export { ScoreIndicator } from "./ScoreIndicator";
 export { SimilarityPanel } from "./SimilarityPanel";
 export { ProjectsPanel } from "./ProjectsPanel";
 export { DuplicatesPanel } from "./DuplicatesPanel";
+export { TabBar } from "./TabBar";
+export { SampleGrid } from "./SampleGrid";
+export { PackTree } from "./PackTree";

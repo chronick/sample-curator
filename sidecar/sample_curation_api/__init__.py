@@ -1,11 +1,21 @@
-"""Sample Curation API - JSON-RPC server for Tauri GUI."""
+"""Sample Curation API - JSON-RPC server for Tauri GUI.
+
+ML-only sidecar. DB operations are handled by native Rust Tauri commands.
+"""
 
 import json
 import sys
 import traceback
 from typing import Any
 
-from sample_curation_api.handlers import HANDLERS
+try:
+    from sample_curation_api.handlers import HANDLERS
+except ImportError as e:
+    # Graceful startup if optional deps are missing
+    print(f"Warning: Some imports failed: {e}", file=sys.stderr)
+    HANDLERS = {
+        "ping": lambda: "pong",
+    }
 
 
 def handle_request(request: dict) -> dict:

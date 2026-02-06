@@ -1,5 +1,8 @@
 /**
- * JSON-RPC client for the Python sidecar API.
+ * API client for Sample Curator.
+ *
+ * DB operations use native Rust Tauri commands (db_*, import_*).
+ * ML operations use the Python sidecar via JSON-RPC (kept for future use).
  */
 
 import { invoke } from "@tauri-apps/api/tauri";
@@ -12,7 +15,6 @@ import type {
   ImportProgress,
   WaveformData,
   SpectrogramData,
-  AnalysisResult,
   SearchAspects,
   SimilarityResult,
   CompatibilityCriteria,
@@ -24,6 +26,8 @@ import type {
   UpdateProjectInput,
   ExportProjectInput,
 } from "./types";
+
+// ============ JSON-RPC (kept for future ML sidecar use) ============
 
 let requestId = 0;
 
@@ -47,6 +51,7 @@ interface JsonRpcResponse<T> {
 
 /**
  * Send a JSON-RPC request to the Python sidecar.
+ * Kept for future ML features (captioning, semantic search).
  */
 async function rpcCall<T>(method: string, params?: Record<string, unknown>): Promise<T> {
   const request: JsonRpcRequest = {
@@ -59,16 +64,11 @@ async function rpcCall<T>(method: string, params?: Record<string, unknown>): Pro
   console.log(`[RPC] Calling ${method}...`, params);
 
   try {
-    // The Rust sidecar returns a JSON string, so we need to parse it
     const responseStr = await invoke<string>("sidecar_call", {
       request: JSON.stringify(request),
     });
 
-    console.log(`[RPC] Raw response for ${method}:`, responseStr);
-
     const response: JsonRpcResponse<T> = JSON.parse(responseStr);
-
-    console.log(`[RPC] Parsed response for ${method}:`, response);
 
     if (response.error) {
       throw new Error(response.error.message);
@@ -85,21 +85,27 @@ async function rpcCall<T>(method: string, params?: Record<string, unknown>): Pro
  * Sample Curator API client.
  */
 export const api = {
+  // ============ Database Commands (Native Rust) ============
+
   /**
    * Search for samples.
    */
   async search(filters: SearchFilters): Promise<SearchResult> {
-    return rpcCall<SearchResult>("search", {
-      query: filters.query,
-      tags: filters.tags,
-      pack_id: filters.pack_id,
-      min_score: filters.min_score,
-      max_score: filters.max_score,
-      sample_type: filters.sample_type,
-      min_bpm: filters.min_bpm,
-      max_bpm: filters.max_bpm,
-      limit: filters.limit ?? 100,
-      offset: filters.offset ?? 0,
+    return invoke<SearchResult>("db_search", {
+      filters: {
+        query: filters.query || null,
+        tags: filters.tags?.length ? filters.tags : null,
+        pack_id: filters.pack_id ?? null,
+        min_score: filters.min_score ?? null,
+        max_score: filters.max_score ?? null,
+        sample_type: filters.sample_type || null,
+        min_bpm: filters.min_bpm ?? null,
+        max_bpm: filters.max_bpm ?? null,
+        sort_field: filters.sort_field || null,
+        sort_direction: filters.sort_direction || null,
+        limit: filters.limit ?? 100,
+        offset: filters.offset ?? 0,
+      },
     });
   },
 
@@ -107,115 +113,159 @@ export const api = {
    * Get a sample by ID.
    */
   async getSample(id: number): Promise<Sample> {
-    return rpcCall<Sample>("get_sample", { id });
+    return invoke<Sample>("db_get_sample", { id });
   },
 
   /**
    * Update a sample.
    */
   async updateSample(id: number, updates: Partial<Sample>): Promise<Sample> {
-    return rpcCall<Sample>("update_sample", { id, updates });
+    return invoke<Sample>("db_update_sample", { id, updates });
   },
 
   /**
    * Delete a sample.
    */
   async deleteSample(id: number): Promise<boolean> {
-    return rpcCall<boolean>("delete_sample", { id });
+    return invoke<boolean>("db_delete_sample", { id });
   },
 
   /**
    * Start an import job.
    */
   async startImport(path: string, options: ImportOptions): Promise<string> {
-    return rpcCall<string>("start_import", { path, options });
+    return invoke<string>("import_start", {
+      path,
+      options: {
+        recursive: options.recursive,
+        analyze: options.analyze,
+        detect_duplicates: options.detect_duplicates,
+      },
+    });
   },
 
   /**
    * Get import progress.
    */
   async getImportProgress(jobId: string): Promise<ImportProgress> {
-    return rpcCall<ImportProgress>("get_import_progress", { job_id: jobId });
+    return invoke<ImportProgress>("import_progress", { jobId });
   },
 
   /**
    * Cancel an import job.
    */
   async cancelImport(jobId: string): Promise<boolean> {
-    return rpcCall<boolean>("cancel_import", { job_id: jobId });
+    return invoke<boolean>("import_cancel", { jobId });
   },
 
   /**
    * Get waveform data for a sample.
+   * Uses native Rust analysis command.
    */
-  async getWaveform(id: number, width: number = 800): Promise<WaveformData> {
-    return rpcCall<WaveformData>("get_waveform", { id, width });
+  async getWaveform(sampleId: number, width: number = 800): Promise<WaveformData> {
+    // First get the sample to get its path
+    const sample = await invoke<Sample>("db_get_sample", { id: sampleId });
+    const result = await invoke<{ data: number[]; duration: number }>("native_waveform", {
+      path: sample.path,
+      width,
+    });
+    return { peaks: result.data, duration: result.duration };
   },
 
   /**
    * List all packs.
    */
   async listPacks(): Promise<Pack[]> {
-    return rpcCall<Pack[]>("list_packs", {});
-  },
-
-  /**
-   * Analyze a sample.
-   */
-  async analyzeSample(id: number): Promise<AnalysisResult> {
-    return rpcCall<AnalysisResult>("analyze_sample", { id });
+    return invoke<Pack[]>("db_list_packs");
   },
 
   /**
    * Get spectrogram data for a sample.
+   * Uses native Rust analysis command.
    */
-  async getSpectrogram(id: number, width: number = 800, height: number = 128): Promise<SpectrogramData> {
-    return rpcCall<SpectrogramData>("get_spectrogram", { id, width, height });
+  async getSpectrogram(sampleId: number, width: number = 800, height: number = 128): Promise<SpectrogramData> {
+    const sample = await invoke<Sample>("db_get_sample", { id: sampleId });
+    return invoke<SpectrogramData>("native_spectrogram", {
+      path: sample.path,
+      width,
+      height,
+    });
   },
 
   /**
    * List all tags.
    */
   async listTags(): Promise<string[]> {
-    return rpcCall<string[]>("list_tags", {});
+    return invoke<string[]>("db_list_tags");
   },
 
   /**
    * Add tags to a sample.
    */
-  async addTags(id: number, tags: string[]): Promise<Sample> {
-    return rpcCall<Sample>("add_tags", { id, tags });
+  async addTags(sampleId: number, tags: string[]): Promise<Sample> {
+    return invoke<Sample>("db_add_tags", { sampleId, tags });
   },
 
   /**
    * Remove tags from a sample.
    */
-  async removeTags(id: number, tags: string[]): Promise<Sample> {
-    return rpcCall<Sample>("remove_tags", { id, tags });
+  async removeTags(sampleId: number, tags: string[]): Promise<Sample> {
+    return invoke<Sample>("db_remove_tags", { sampleId, tags });
   },
 
   /**
    * Batch update samples.
    */
   async batchUpdate(ids: number[], updates: Partial<Sample>): Promise<number> {
-    return rpcCall<number>("batch_update", { ids, updates });
+    return invoke<number>("db_batch_update", { ids, updates });
   },
 
   /**
    * Batch delete samples.
    */
   async batchDelete(ids: number[]): Promise<number> {
-    return rpcCall<number>("batch_delete", { ids });
+    return invoke<number>("db_batch_delete", { ids });
   },
 
   /**
    * Batch add tags.
    */
   async batchAddTags(ids: number[], tags: string[]): Promise<number> {
-    return rpcCall<number>("batch_add_tags", { ids, tags });
+    return invoke<number>("db_batch_add_tags", { ids, tags });
   },
 
-  // ============ Native Search Commands (Rust, bypasses Python sidecar) ============
+  /**
+   * Get sample counts by type (for PackTree).
+   */
+  async getTypeCounts(): Promise<Array<[string, number]>> {
+    return invoke<Array<[string, number]>>("db_get_type_counts");
+  },
+
+  /**
+   * Analyze a sample using native Rust analyzers and update DB.
+   */
+  async analyzeSample(id: number): Promise<void> {
+    const sample = await invoke<Sample>("db_get_sample", { id });
+    // Run quality analysis
+    try {
+      const quality = await invoke<{
+        rms_db: number;
+        peak_db: number;
+        crest_factor: number;
+        dynamic_range: number;
+        clipping_detected: boolean;
+      }>("native_quality", { path: sample.path });
+      // Update what we can through the update command
+      await invoke("db_update_sample", {
+        id,
+        updates: { quality_score: Math.min(100, Math.max(0, (quality.dynamic_range / 20) * 100 - (quality.clipping_detected ? 20 : 0))) },
+      });
+    } catch (err) {
+      console.warn("Quality analysis failed:", err);
+    }
+  },
+
+  // ============ Similarity & Compatibility Search (Native Rust) ============
 
   /**
    * Find similar samples using native Rust similarity search.
@@ -270,51 +320,30 @@ export const api = {
 
   // ============ Project Commands (Native Rust) ============
 
-  /**
-   * Create a new project.
-   */
   async createProject(input: CreateProjectInput): Promise<Project> {
     return invoke<Project>("create_project", { input });
   },
 
-  /**
-   * List all projects.
-   */
   async listProjects(): Promise<Project[]> {
     return invoke<Project[]>("list_projects");
   },
 
-  /**
-   * Get a project by ID.
-   */
   async getProject(projectId: number): Promise<Project | null> {
     return invoke<Project | null>("get_project", { projectId });
   },
 
-  /**
-   * Update a project.
-   */
   async updateProject(projectId: number, input: UpdateProjectInput): Promise<Project> {
     return invoke<Project>("update_project", { projectId, input });
   },
 
-  /**
-   * Delete a project.
-   */
   async deleteProject(projectId: number): Promise<void> {
     return invoke<void>("delete_project", { projectId });
   },
 
-  /**
-   * Get samples in a project.
-   */
   async getProjectSamples(projectId: number): Promise<ProjectSample[]> {
     return invoke<ProjectSample[]>("get_project_samples", { projectId });
   },
 
-  /**
-   * Add a sample to a project.
-   */
   async addSampleToProject(
     projectId: number,
     sampleId: number,
@@ -328,9 +357,6 @@ export const api = {
     });
   },
 
-  /**
-   * Remove a sample from a project.
-   */
   async removeSampleFromProject(projectId: number, sampleId: number): Promise<void> {
     return invoke<void>("remove_sample_from_project", {
       projectId,
@@ -338,32 +364,20 @@ export const api = {
     });
   },
 
-  /**
-   * Export a project.
-   */
   async exportProject(projectId: number, input: ExportProjectInput): Promise<string[]> {
     return invoke<string[]>("export_project_command", { projectId, input });
   },
 
   // ============ Background Job Commands (Native Rust) ============
 
-  /**
-   * Get job queue statistics.
-   */
   async getJobStats(): Promise<JobStatusResponse> {
     return invoke<JobStatusResponse>("get_job_stats");
   },
 
-  /**
-   * Queue embedding jobs for all samples missing embeddings.
-   */
   async queueMissingEmbeddings(priority?: number): Promise<number> {
     return invoke<number>("queue_missing_embeddings", { priority });
   },
 
-  /**
-   * Queue a job for a specific sample.
-   */
   async queueSampleJob(sampleId: number, jobType: string, priority?: number): Promise<number> {
     return invoke<number>("queue_sample_job", {
       sampleId,
@@ -372,32 +386,29 @@ export const api = {
     });
   },
 
-  /**
-   * Start the background job worker.
-   */
   async startJobWorker(): Promise<boolean> {
     return invoke<boolean>("start_job_worker");
   },
 
-  /**
-   * Stop the background job worker.
-   */
   async stopJobWorker(): Promise<boolean> {
     return invoke<boolean>("stop_job_worker");
   },
 
-  /**
-   * Reset stuck jobs from previous runs.
-   */
   async resetStuckJobs(): Promise<number> {
     return invoke<number>("reset_stuck_jobs");
   },
 
-  /**
-   * Clean up old completed/failed jobs.
-   */
   async cleanupOldJobs(daysOld?: number): Promise<number> {
     return invoke<number>("cleanup_old_jobs", { daysOld });
+  },
+
+  // ============ ML Sidecar Commands (Python, future use) ============
+
+  /**
+   * Call ML sidecar for captioning (future).
+   */
+  async sidecarCall<T>(method: string, params?: Record<string, unknown>): Promise<T> {
+    return rpcCall<T>(method, params);
   },
 };
 

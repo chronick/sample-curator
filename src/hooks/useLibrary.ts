@@ -18,6 +18,12 @@ export function useLibrary() {
     error,
     packs,
     allTags,
+    typeCounts,
+    sortField,
+    sortDirection,
+    viewMode,
+    tabs,
+    activeTabId,
     setSamples,
     setSelectedSample,
     toggleSelection,
@@ -27,10 +33,16 @@ export function useLibrary() {
     resetFilters,
     setPacks,
     setTags,
+    setTypeCounts,
     setLoading,
     setError,
     updateSample,
     removeSamples,
+    setSortField,
+    setViewMode,
+    addTab,
+    closeTab,
+    setActiveTab,
   } = useStore();
 
   // Fetch samples when filters change
@@ -68,19 +80,31 @@ export function useLibrary() {
     }
   }, [setTags]);
 
+  // Fetch type counts
+  const fetchTypeCounts = useCallback(async () => {
+    try {
+      const counts = await api.getTypeCounts();
+      setTypeCounts(counts);
+    } catch (err) {
+      console.error("Failed to fetch type counts:", err);
+    }
+  }, [setTypeCounts]);
+
   // Initial load
   useEffect(() => {
     fetchSamples();
     fetchPacks();
     fetchTags();
-  }, [fetchSamples, fetchPacks, fetchTags]);
+    fetchTypeCounts();
+  }, [fetchSamples, fetchPacks, fetchTags, fetchTypeCounts]);
 
   // Refresh all data
   const refresh = useCallback(() => {
     fetchSamples();
     fetchPacks();
     fetchTags();
-  }, [fetchSamples, fetchPacks, fetchTags]);
+    fetchTypeCounts();
+  }, [fetchSamples, fetchPacks, fetchTags, fetchTypeCounts]);
 
   // Select a sample
   const selectSample = useCallback(
@@ -148,6 +172,12 @@ export function useLibrary() {
     error,
     packs,
     allTags,
+    typeCounts,
+    sortField,
+    sortDirection,
+    viewMode,
+    tabs,
+    activeTabId,
 
     // Actions
     setFilters: updateFilters,
@@ -160,6 +190,11 @@ export function useLibrary() {
     deleteSamples,
     addTagsToSamples,
     updateSample: updateSampleData,
+    setSortField,
+    setViewMode,
+    addTab,
+    closeTab,
+    setActiveTab,
   };
 }
 

@@ -1,20 +1,47 @@
 /**
- * Sample browser with virtual scrolling.
+ * Sample browser with virtual scrolling and sortable columns.
  */
 
 import { useRef, useCallback } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { Sample } from "../api/types";
 import { ScoreIndicator } from "./ScoreIndicator";
+import { getTypeEmoji } from "../utils/emoji";
+
+interface SortConfig {
+  field: string;
+  direction: "asc" | "desc";
+}
 
 interface SampleBrowserProps {
   samples: Sample[];
   selectedSample: Sample | null;
   selectedIds: Set<number>;
   loading: boolean;
+  sortConfig?: SortConfig;
   onSelect: (sample: Sample) => void;
   onToggleSelect: (id: number) => void;
   onPlay: (sample: Sample) => void;
+  onSort?: (field: string) => void;
+}
+
+const SORTABLE_COLUMNS: Array<{ key: string; label: string; className: string; align?: string }> = [
+  { key: "path", label: "Name", className: "flex-1 px-2 py-2" },
+  { key: "applicability_score", label: "Score", className: "w-20 px-2 py-2 text-right", align: "right" },
+  { key: "bpm", label: "BPM", className: "w-16 px-2 py-2 text-right", align: "right" },
+  { key: "key", label: "Key", className: "w-16 px-2 py-2" },
+  { key: "sample_type", label: "Type", className: "w-24 px-2 py-2" },
+];
+
+function SortIndicator({ field, sortConfig }: { field: string; sortConfig?: SortConfig }) {
+  if (!sortConfig || sortConfig.field !== field) {
+    return <span className="text-gray-600 ml-1">{"  "}</span>;
+  }
+  return (
+    <span className="text-accent ml-1">
+      {sortConfig.direction === "asc" ? "\u2191" : "\u2193"}
+    </span>
+  );
 }
 
 export function SampleBrowser({
@@ -22,9 +49,11 @@ export function SampleBrowser({
   selectedSample,
   selectedIds,
   loading,
+  sortConfig,
   onSelect,
   onToggleSelect,
   onPlay,
+  onSort,
 }: SampleBrowserProps) {
   const parentRef = useRef<HTMLDivElement>(null);
 
@@ -101,14 +130,19 @@ export function SampleBrowser({
           position: "relative",
         }}
       >
-        {/* Header */}
+        {/* Header with sortable columns */}
         <div className="sticky top-0 z-10 flex bg-surface-raised border-b border-surface-border text-xs text-gray-400 font-medium">
           <div className="w-8 px-2 py-2" />
-          <div className="flex-1 px-2 py-2">Name</div>
-          <div className="w-20 px-2 py-2 text-right">Score</div>
-          <div className="w-16 px-2 py-2 text-right">BPM</div>
-          <div className="w-16 px-2 py-2">Key</div>
-          <div className="w-20 px-2 py-2">Type</div>
+          {SORTABLE_COLUMNS.map((col) => (
+            <div
+              key={col.key}
+              className={`${col.className} cursor-pointer hover:text-gray-200 select-none transition-colors`}
+              onClick={() => onSort?.(col.key)}
+            >
+              {col.label}
+              <SortIndicator field={col.key} sortConfig={sortConfig} />
+            </div>
+          ))}
           <div className="w-32 px-2 py-2">Tags</div>
         </div>
 
@@ -117,6 +151,7 @@ export function SampleBrowser({
           const sample = samples[virtualItem.index];
           const isSelected = selectedSample?.id === sample.id;
           const isChecked = selectedIds.has(sample.id);
+          const emoji = getTypeEmoji(sample.sample_type);
 
           return (
             <div
@@ -158,7 +193,8 @@ export function SampleBrowser({
               <div className="w-16 px-2 text-sm text-gray-400">
                 {sample.key || "-"}
               </div>
-              <div className="w-20 px-2 text-sm text-gray-400 truncate">
+              <div className="w-24 px-2 text-sm text-gray-400 truncate">
+                {emoji && <span className="mr-1">{emoji}</span>}
                 {sample.sample_type || "-"}
               </div>
               <div className="w-32 px-2 flex gap-1 overflow-hidden">

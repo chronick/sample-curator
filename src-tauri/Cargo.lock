@@ -3066,12 +3066,15 @@ name = "sample-curator"
 version = "0.1.0"
 dependencies = [
  "rodio",
+ "rusqlite",
  "sample-analysis-core",
  "sample-library-core",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
+ "tempfile",
+ "uuid",
 ]
 
 [[package]]

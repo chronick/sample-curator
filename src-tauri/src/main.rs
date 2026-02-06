@@ -6,19 +6,25 @@
 mod analysis;
 mod audio;
 mod categorization;
+mod db_commands;
 mod duplicates;
+mod import_commands;
 mod jobs;
 mod projects;
 mod search;
 mod sidecar;
+mod watch;
 
 use audio::AudioState;
 use categorization::CategorizationState;
+use db_commands::DbState;
 use duplicates::DuplicateState;
+use import_commands::ImportState;
 use jobs::JobState;
 use projects::ProjectState;
 use search::SearchState;
 use sidecar::SidecarManager;
+use watch::WatchState;
 use std::sync::Mutex;
 use tauri::State;
 
@@ -34,10 +40,17 @@ fn sidecar_call(
 ) -> Result<String, String> {
     let mut sidecar_guard = state.sidecar.lock().map_err(|e| e.to_string())?;
 
-    // Initialize sidecar if not already running
+    // Initialize sidecar if not already running (graceful — app works without it)
     if sidecar_guard.is_none() {
-        let manager = SidecarManager::new().map_err(|e| e.to_string())?;
-        *sidecar_guard = Some(manager);
+        match SidecarManager::new() {
+            Ok(manager) => {
+                *sidecar_guard = Some(manager);
+            }
+            Err(e) => {
+                eprintln!("Warning: Python sidecar failed to start: {}. ML features unavailable.", e);
+                return Err(format!("Python sidecar not available: {}. DB operations use native commands (db_*) instead.", e));
+            }
+        }
     }
 
     let sidecar = sidecar_guard.as_mut().unwrap();
@@ -84,6 +97,9 @@ fn main() {
             sidecar: Mutex::new(None),
             audio: AudioState::new(),
         })
+        .manage(DbState::new())
+        .manage(ImportState::new())
+        .manage(WatchState::new())
         .manage(SearchState::new())
         .manage(ProjectState::new())
         .manage(CategorizationState::new())
@@ -97,6 +113,29 @@ fn main() {
             audio_stop,
             audio_set_volume,
             audio_get_status,
+            // Database CRUD commands (replaces sidecar for DB ops)
+            db_commands::db_search,
+            db_commands::db_get_sample,
+            db_commands::db_update_sample,
+            db_commands::db_delete_sample,
+            db_commands::db_list_packs,
+            db_commands::db_list_tags,
+            db_commands::db_add_tags,
+            db_commands::db_remove_tags,
+            db_commands::db_batch_update,
+            db_commands::db_batch_delete,
+            db_commands::db_batch_add_tags,
+            db_commands::db_get_type_counts,
+            // Import pipeline
+            import_commands::import_start,
+            import_commands::import_progress,
+            import_commands::import_cancel,
+            // Watch directory management
+            watch::watch_add_directory,
+            watch::watch_remove_directory,
+            watch::watch_list_directories,
+            watch::watch_start,
+            watch::watch_stop,
             // Native analysis commands (bypass sidecar for hot paths)
             analysis::native_spectrogram,
             analysis::native_waveform,
