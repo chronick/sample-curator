@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, Component, ErrorInfo, ReactNode } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, Component, ErrorInfo, ReactNode, type MouseEvent as ReactMouseEvent } from "react";
 import { SampleBrowser } from "./components/SampleBrowser";
 import { SampleGrid } from "./components/SampleGrid";
 import { FileBrowser } from "./components/FileBrowser";
@@ -13,11 +13,15 @@ import { QueryBar } from "./components/QueryBar";
 import { FilterBreadcrumbs } from "./components/FilterBreadcrumbs";
 import { TabBar } from "./components/TabBar";
 import { AcousticBadges } from "./components/AcousticBadges";
+import { ConstellationExplorer } from "./components/ConstellationExplorer";
+import { RadarComparator, MiniRadar } from "./components/RadarComparator";
+import { SpectralColorWheel } from "./components/SpectralColorWheel";
 import { useLibrary } from "./hooks/useLibrary";
 import { useStore } from "./store";
 import { usePlayer } from "./hooks/usePlayer";
 import { api, JobStatusResponse } from "./api/client";
-import type { Sample, SearchFilters } from "./api/types";
+import type { Sample, SearchFilters, ViewMode } from "./api/types";
+import { derivePerceptualAttributes, getAnalysisCoverage, getCategoryColor } from "./utils/perceptualAttributes";
 
 // Error boundary to catch render errors
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; error: string }> {
@@ -51,6 +55,75 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
 
 type RightPanelMode = "details" | "similar" | "projects" | "duplicates";
 
+const EXPLORE_MODES: { mode: ViewMode; label: string; icon: string }[] = [
+  { mode: "constellation", label: "Constellation", icon: "\u2726" },
+  { mode: "radar", label: "Radar Grid", icon: "\u25C9" },
+  { mode: "colorwheel", label: "Color Wheel", icon: "\u25D4" },
+];
+
+function isExploreMode(mode: ViewMode): boolean {
+  return mode === "constellation" || mode === "radar" || mode === "colorwheel";
+}
+
+// --- Resizable panel drag handle ---
+function DragHandle({
+  direction,
+  onDrag,
+}: {
+  direction: "horizontal" | "vertical";
+  onDrag: (delta: number) => void;
+}) {
+  const handleMouseDown = useCallback(
+    (e: ReactMouseEvent) => {
+      e.preventDefault();
+      document.body.style.userSelect = "none";
+      document.body.style.cursor =
+        direction === "vertical" ? "col-resize" : "row-resize";
+
+      let lastPos = direction === "vertical" ? e.clientX : e.clientY;
+
+      const onMouseMove = (ev: MouseEvent) => {
+        const current = direction === "vertical" ? ev.clientX : ev.clientY;
+        onDrag(current - lastPos);
+        lastPos = current;
+      };
+
+      const onMouseUp = () => {
+        document.body.style.userSelect = "";
+        document.body.style.cursor = "";
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
+      };
+
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
+    },
+    [direction, onDrag]
+  );
+
+  const isVertical = direction === "vertical";
+
+  return (
+    <div
+      onMouseDown={handleMouseDown}
+      className={`flex-shrink-0 ${
+        isVertical
+          ? "w-1 cursor-col-resize hover:bg-accent/40 active:bg-accent/60"
+          : "h-1 cursor-row-resize hover:bg-accent/40 active:bg-accent/60"
+      } bg-surface-border transition-colors group relative`}
+    >
+      {/* Wider invisible hit area */}
+      <div
+        className={`absolute ${
+          isVertical
+            ? "inset-y-0 -left-1 -right-1"
+            : "inset-x-0 -top-1 -bottom-1"
+        }`}
+      />
+    </div>
+  );
+}
+
 function AppContent() {
   const [showImport, setShowImport] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -58,6 +131,19 @@ function AppContent() {
   const [rightPanelMode, setRightPanelMode] = useState<RightPanelMode>("details");
   const [jobStatus, setJobStatus] = useState<JobStatusResponse | null>(null);
   const [acousticTags, setAcousticTags] = useState<string[]>([]);
+  const [showExploreMenu, setShowExploreMenu] = useState(false);
+  const exploreMenuRef = useRef<HTMLDivElement>(null);
+
+  // Panel sizes (px)
+  const [leftWidth, setLeftWidth] = useState(256);
+  const [rightWidth, setRightWidth] = useState(288);
+  const [browsePlayerH, setBrowsePlayerH] = useState(288);
+  const [explorePlayerH, setExplorePlayerH] = useState(180);
+
+  // Panel visibility
+  const [showLeft, setShowLeft] = useState(true);
+  const [showRight, setShowRight] = useState(true);
+  const [showPlayer, setShowPlayer] = useState(true);
 
   // Check for Tauri context
   useEffect(() => {
@@ -107,6 +193,9 @@ function AppContent() {
     closeTab,
     setActiveTab,
   } = useLibrary();
+
+  const playerHeight = isExploreMode(viewMode) ? explorePlayerH : browsePlayerH;
+  const setPlayerHeight = isExploreMode(viewMode) ? setExplorePlayerH : setBrowsePlayerH;
 
   const { currentSample, isPlaying, progress, play, pause, resume, seek } = usePlayer();
 
@@ -171,6 +260,34 @@ function AppContent() {
     [filters, setFilters]
   );
 
+  // Close explore menu on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (exploreMenuRef.current && !exploreMenuRef.current.contains(e.target as Node)) {
+        setShowExploreMenu(false);
+      }
+    };
+    if (showExploreMenu) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [showExploreMenu]);
+
+  // Analysis coverage for banner
+  const analysisCoverage = useMemo(() => {
+    if (samples.length === 0) return { analyzed: 0, total: 0, pct: 100 };
+    const analyzed = samples.filter((s) => s.analyzed_at !== null).length;
+    return { analyzed, total: samples.length, pct: Math.round((analyzed / samples.length) * 100) };
+  }, [samples]);
+
+  // Previous browse mode (to return from explore)
+  const prevBrowseMode = useRef<ViewMode>("list");
+  useEffect(() => {
+    if (viewMode === "list" || viewMode === "grid") {
+      prevBrowseMode.current = viewMode;
+    }
+  }, [viewMode]);
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -179,6 +296,23 @@ function AppContent() {
         e.target instanceof HTMLInputElement ||
         e.target instanceof HTMLTextAreaElement
       ) {
+        return;
+      }
+
+      // Panel toggle shortcuts (Cmd/Ctrl combos)
+      if ((e.metaKey || e.ctrlKey) && e.key === "b" && !e.shiftKey) {
+        e.preventDefault();
+        setShowLeft((v) => !v);
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === "j") {
+        e.preventDefault();
+        setShowPlayer((v) => !v);
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === "b" && e.shiftKey) {
+        e.preventDefault();
+        setShowRight((v) => !v);
         return;
       }
 
@@ -284,8 +418,28 @@ function AppContent() {
         case "g":
           if (!e.metaKey && !e.ctrlKey) {
             e.preventDefault();
-            setViewMode(viewMode === "list" ? "grid" : "list");
+            // Only cycle between list and grid (browse modes)
+            if (isExploreMode(viewMode)) {
+              setViewMode("list");
+            } else {
+              setViewMode(viewMode === "list" ? "grid" : "list");
+            }
           }
+          break;
+
+        case "v":
+          if (!e.metaKey && !e.ctrlKey) {
+            e.preventDefault();
+            setShowExploreMenu((prev) => !prev);
+          }
+          break;
+
+        case "Escape":
+          if (isExploreMode(viewMode)) {
+            e.preventDefault();
+            setViewMode(prevBrowseMode.current);
+          }
+          setShowExploreMenu(false);
           break;
       }
 
@@ -331,13 +485,118 @@ function AppContent() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
           </button>
-          {/* View mode toggle */}
+          {/* Toggle left sidebar */}
           <button
-            onClick={() => setViewMode(viewMode === "list" ? "grid" : "list")}
-            className="px-2 py-1.5 bg-surface hover:bg-surface-hover border border-surface-border rounded text-sm transition-colors"
+            onClick={() => setShowLeft((v) => !v)}
+            className={`px-2 py-1.5 border rounded text-sm transition-colors ${
+              showLeft
+                ? "bg-accent/20 border-accent text-accent"
+                : "bg-surface hover:bg-surface-hover border-surface-border text-gray-500"
+            }`}
+            title={`Toggle left sidebar (${navigator.platform.includes("Mac") ? "\u2318" : "Ctrl+"}B)`}
+          >
+            <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor">
+              <rect x="1" y="1" width="14" height="14" rx="1" fill="none" stroke="currentColor" strokeWidth="1.2" />
+              <rect x="1" y="1" width="5" height="14" rx="1" fill="currentColor" opacity="0.5" />
+            </svg>
+          </button>
+          {/* Explore dropdown */}
+          <div className="relative" ref={exploreMenuRef}>
+            <button
+              onClick={() => setShowExploreMenu((prev) => !prev)}
+              className={`px-2 py-1.5 border rounded text-sm transition-colors ${
+                isExploreMode(viewMode)
+                  ? "bg-accent/20 border-accent text-accent"
+                  : "bg-surface hover:bg-surface-hover border-surface-border"
+              }`}
+              title="Explore visualizations (V)"
+            >
+              {isExploreMode(viewMode)
+                ? EXPLORE_MODES.find((m) => m.mode === viewMode)?.icon || "\u2726"
+                : "\u2726"}{" "}
+              Explore
+            </button>
+            {showExploreMenu && (
+              <div className="absolute right-0 top-full mt-1 w-48 bg-surface-raised border border-surface-border rounded-lg shadow-xl z-50 py-1">
+                {EXPLORE_MODES.map(({ mode, label, icon }) => (
+                  <button
+                    key={mode}
+                    onClick={() => {
+                      setViewMode(mode);
+                      setShowExploreMenu(false);
+                    }}
+                    className={`w-full text-left px-3 py-2 text-sm hover:bg-surface-hover transition-colors flex items-center gap-2 ${
+                      viewMode === mode ? "text-accent" : ""
+                    }`}
+                  >
+                    <span>{icon}</span>
+                    <span>{label}</span>
+                  </button>
+                ))}
+                {isExploreMode(viewMode) && (
+                  <>
+                    <div className="border-t border-surface-border my-1" />
+                    <button
+                      onClick={() => {
+                        setViewMode(prevBrowseMode.current);
+                        setShowExploreMenu(false);
+                      }}
+                      className="w-full text-left px-3 py-2 text-sm text-gray-400 hover:bg-surface-hover transition-colors"
+                    >
+                      Back to {prevBrowseMode.current === "grid" ? "Grid" : "List"}
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+          {/* View mode toggle (list/grid) */}
+          <button
+            onClick={() => {
+              if (isExploreMode(viewMode)) {
+                setViewMode("list");
+              } else {
+                setViewMode(viewMode === "list" ? "grid" : "list");
+              }
+            }}
+            className={`px-2 py-1.5 border rounded text-sm transition-colors ${
+              !isExploreMode(viewMode)
+                ? "bg-surface hover:bg-surface-hover border-surface-border"
+                : "bg-surface border-surface-border text-gray-500"
+            }`}
             title={`Switch to ${viewMode === "list" ? "grid" : "list"} view (G)`}
           >
             {viewMode === "list" ? "\u2637" : "\u2630"}
+          </button>
+          {/* Toggle player panel */}
+          <button
+            onClick={() => setShowPlayer((v) => !v)}
+            className={`px-2 py-1.5 border rounded text-sm transition-colors ${
+              showPlayer
+                ? "bg-accent/20 border-accent text-accent"
+                : "bg-surface hover:bg-surface-hover border-surface-border text-gray-500"
+            }`}
+            title={`Toggle player (${navigator.platform.includes("Mac") ? "\u2318" : "Ctrl+"}J)`}
+          >
+            <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor">
+              <rect x="1" y="1" width="14" height="14" rx="1" fill="none" stroke="currentColor" strokeWidth="1.2" />
+              <rect x="1" y="10" width="14" height="5" rx="1" fill="currentColor" opacity="0.5" />
+            </svg>
+          </button>
+          {/* Toggle right sidebar */}
+          <button
+            onClick={() => setShowRight((v) => !v)}
+            className={`px-2 py-1.5 border rounded text-sm transition-colors ${
+              showRight
+                ? "bg-accent/20 border-accent text-accent"
+                : "bg-surface hover:bg-surface-hover border-surface-border text-gray-500"
+            }`}
+            title={`Toggle right sidebar (${navigator.platform.includes("Mac") ? "\u2318\u21e7" : "Ctrl+Shift+"}B)`}
+          >
+            <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor">
+              <rect x="1" y="1" width="14" height="14" rx="1" fill="none" stroke="currentColor" strokeWidth="1.2" />
+              <rect x="10" y="1" width="5" height="14" rx="1" fill="currentColor" opacity="0.5" />
+            </svg>
           </button>
           <button
             onClick={() => setShowImport(true)}
@@ -383,15 +642,50 @@ function AppContent() {
       {/* Main content */}
       <div className="flex flex-1 overflow-hidden">
         {/* Left sidebar: File Browser */}
-        <aside className="w-64 border-r border-surface-border bg-surface overflow-y-auto flex flex-col">
-          <FileBrowser
-            onSelectSample={handleSelectSampleById}
-            onPlayFile={(path) => play(path)}
-          />
-        </aside>
+        {showLeft && (
+          <>
+            <aside
+              style={{ width: leftWidth }}
+              className="flex-shrink-0 border-r border-surface-border bg-surface overflow-y-auto flex flex-col"
+            >
+              <FileBrowser
+                onSelectSample={handleSelectSampleById}
+                onPlayFile={(path) => play(path)}
+              />
+            </aside>
+            <DragHandle
+              direction="vertical"
+              onDrag={(delta) =>
+                setLeftWidth((w) => Math.min(500, Math.max(160, w + delta)))
+              }
+            />
+          </>
+        )}
 
-        {/* Sample browser / grid */}
+        {/* Sample browser / grid / explore views */}
         <main className="flex-1 min-w-0 flex flex-col overflow-hidden">
+          {/* Analysis coverage banner (shown in explore modes when coverage is low) */}
+          {isExploreMode(viewMode) && analysisCoverage.pct < 80 && analysisCoverage.total > 0 && (
+            <div className="px-4 py-2 bg-yellow-900/20 border-b border-yellow-700/30 flex items-center justify-between text-[11px]">
+              <span className="text-yellow-500/80">
+                {analysisCoverage.pct}% of samples analyzed — some visualizations may be incomplete
+              </span>
+              <button
+                onClick={async () => {
+                  const unanalyzed = samples.filter((s) => s.analyzed_at === null);
+                  for (const s of unanalyzed.slice(0, 50)) {
+                    try {
+                      await api.queueSampleJob(s.id, "analysis");
+                    } catch {}
+                  }
+                }}
+                className="text-yellow-400 hover:text-yellow-300 font-medium ml-4 whitespace-nowrap"
+              >
+                Analyze All
+              </button>
+            </div>
+          )}
+
           {viewMode === "list" ? (
             <SampleBrowser
               samples={samples}
@@ -404,7 +698,7 @@ function AppContent() {
               onPlay={(sample) => play(sample.path)}
               onSort={setSortField}
             />
-          ) : (
+          ) : viewMode === "grid" ? (
             <SampleGrid
               samples={samples}
               selectedSample={selectedSample}
@@ -413,95 +707,184 @@ function AppContent() {
               onToggleSelect={toggleSelection}
               onPlay={(sample) => play(sample.path)}
             />
-          )}
+          ) : viewMode === "constellation" ? (
+            <ConstellationExplorer
+              samples={samples}
+              selectedSample={selectedSample}
+              selectedIds={selectedIds}
+              onSelect={selectSample}
+              onToggleSelect={toggleSelection}
+              onPlay={(sample) => play(sample.path)}
+            />
+          ) : viewMode === "radar" ? (
+            <RadarComparator
+              samples={samples}
+              selectedSample={selectedSample}
+              selectedIds={selectedIds}
+              onSelect={selectSample}
+              onToggleSelect={toggleSelection}
+              onPlay={(sample) => play(sample.path)}
+            />
+          ) : viewMode === "colorwheel" ? (
+            <SpectralColorWheel
+              samples={samples}
+              selectedSample={selectedSample}
+              selectedIds={selectedIds}
+              onSelect={selectSample}
+              onToggleSelect={toggleSelection}
+              onPlay={(sample) => play(sample.path)}
+            />
+          ) : null}
 
-          {/* Waveform and details */}
-          {selectedSample && (
-            <div className="h-72 border-t border-surface-border bg-surface-raised flex overflow-hidden">
-              <div className="flex-1 min-w-0 p-4">
-                <WaveformView
-                  sample={selectedSample}
-                  isPlaying={isPlaying && currentSample === selectedSample.path}
-                  progress={currentSample === selectedSample.path ? progress : 0}
-                  onSeek={seek}
-                  onPlay={() => play(selectedSample.path)}
-                />
+          {/* Unified player panel */}
+          {showPlayer && selectedSample && (
+            <>
+              <DragHandle
+                direction="horizontal"
+                onDrag={(delta) =>
+                  setPlayerHeight((h) => Math.min(500, Math.max(80, h - delta)))
+                }
+              />
+              <div
+                style={{ height: playerHeight }}
+                className="border-t border-surface-border bg-surface-raised flex overflow-y-auto flex-shrink-0"
+              >
+                <div className="flex-1 min-w-0 p-4 min-h-0">
+                  <WaveformView
+                    sample={selectedSample}
+                    isPlaying={isPlaying && currentSample === selectedSample.path}
+                    progress={currentSample === selectedSample.path ? progress : 0}
+                    onSeek={seek}
+                    onPlay={() => play(selectedSample.path)}
+                  />
+                </div>
+                {isExploreMode(viewMode) ? (
+                  <div className="flex-shrink-0 px-4 py-2 border-l border-surface-border flex flex-col gap-2 h-full justify-center min-w-[200px]">
+                    <div className="text-sm truncate" title={selectedSample.path}>
+                      {selectedSample.path.split("/").pop()}
+                    </div>
+                    <div className="text-xs text-gray-500 flex items-center gap-3">
+                      {selectedSample.sample_type && <span>{selectedSample.sample_type}</span>}
+                      {selectedSample.bpm && <span>{Math.round(selectedSample.bpm)} BPM</span>}
+                      {selectedSample.key && <span>{selectedSample.key}</span>}
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          if (isPlaying && currentSample === selectedSample.path) {
+                            pause();
+                          } else {
+                            play(selectedSample.path);
+                          }
+                        }}
+                        className="px-3 py-1 bg-accent hover:bg-accent-hover rounded text-xs font-medium transition-colors"
+                      >
+                        {isPlaying && currentSample === selectedSample.path ? "Pause" : "Play"}
+                      </button>
+                      <button
+                        onClick={async () => {
+                          try {
+                            await api.queueSampleJob(selectedSample.id, "analysis");
+                          } catch {}
+                        }}
+                        className="px-3 py-1 bg-surface hover:bg-surface-hover border border-surface-border rounded text-xs transition-colors"
+                        title="Queue this sample for analysis"
+                      >
+                        Analyze
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="w-72 border-l border-surface-border p-4 flex-shrink-0">
+                    <TagEditor
+                      sample={selectedSample}
+                      selectedCount={selectedIds.size}
+                      onUpdate={refresh}
+                    />
+                  </div>
+                )}
               </div>
-              <div className="w-72 border-l border-surface-border p-4">
-                <TagEditor
-                  sample={selectedSample}
-                  selectedCount={selectedIds.size}
-                  onUpdate={refresh}
-                />
-              </div>
-            </div>
+            </>
           )}
         </main>
 
         {/* Right panel (similar/compatible/projects) */}
-        <aside className="w-72 border-l border-surface-border bg-surface flex flex-col">
-          {/* Panel mode tabs */}
-          <div className="flex border-b border-surface-border text-xs">
-            <button
-              className={`flex-1 px-2 py-2 transition-colors ${
-                rightPanelMode === "details" ? "bg-surface-hover text-accent" : "hover:bg-surface-hover"
-              }`}
-              onClick={() => setRightPanelMode("details")}
+        {showRight && (
+          <>
+            <DragHandle
+              direction="vertical"
+              onDrag={(delta) =>
+                setRightWidth((w) => Math.min(500, Math.max(200, w - delta)))
+              }
+            />
+            <aside
+              style={{ width: rightWidth }}
+              className="flex-shrink-0 border-l border-surface-border bg-surface flex flex-col"
             >
-              Details
-            </button>
-            <button
-              className={`flex-1 px-2 py-2 transition-colors ${
-                rightPanelMode === "similar" ? "bg-surface-hover text-accent" : "hover:bg-surface-hover"
-              }`}
-              onClick={() => setRightPanelMode("similar")}
-            >
-              Similar
-            </button>
-            <button
-              className={`flex-1 px-2 py-2 transition-colors ${
-                rightPanelMode === "projects" ? "bg-surface-hover text-accent" : "hover:bg-surface-hover"
-              }`}
-              onClick={() => setRightPanelMode("projects")}
-            >
-              Projects
-            </button>
-            <button
-              className={`flex-1 px-2 py-2 transition-colors ${
-                rightPanelMode === "duplicates" ? "bg-surface-hover text-accent" : "hover:bg-surface-hover"
-              }`}
-              onClick={() => setRightPanelMode("duplicates")}
-            >
-              Dupes
-            </button>
-          </div>
+              {/* Panel mode tabs */}
+              <div className="flex border-b border-surface-border text-xs">
+                <button
+                  className={`flex-1 px-2 py-2 transition-colors ${
+                    rightPanelMode === "details" ? "bg-surface-hover text-accent" : "hover:bg-surface-hover"
+                  }`}
+                  onClick={() => setRightPanelMode("details")}
+                >
+                  Details
+                </button>
+                <button
+                  className={`flex-1 px-2 py-2 transition-colors ${
+                    rightPanelMode === "similar" ? "bg-surface-hover text-accent" : "hover:bg-surface-hover"
+                  }`}
+                  onClick={() => setRightPanelMode("similar")}
+                >
+                  Similar
+                </button>
+                <button
+                  className={`flex-1 px-2 py-2 transition-colors ${
+                    rightPanelMode === "projects" ? "bg-surface-hover text-accent" : "hover:bg-surface-hover"
+                  }`}
+                  onClick={() => setRightPanelMode("projects")}
+                >
+                  Projects
+                </button>
+                <button
+                  className={`flex-1 px-2 py-2 transition-colors ${
+                    rightPanelMode === "duplicates" ? "bg-surface-hover text-accent" : "hover:bg-surface-hover"
+                  }`}
+                  onClick={() => setRightPanelMode("duplicates")}
+                >
+                  Dupes
+                </button>
+              </div>
 
-          {/* Panel content */}
-          <div className="flex-1 overflow-hidden">
-            {rightPanelMode === "details" && selectedSample && (
-              <SampleDetails sample={selectedSample} acousticTags={acousticTags} onUpdate={(updated) => {
-                useStore.getState().updateSample(updated);
-              }} />
-            )}
-            {rightPanelMode === "similar" && (
-              <SimilarityPanel
-                sample={selectedSample}
-                onSelectSample={handleSelectSampleById}
-              />
-            )}
-            {rightPanelMode === "projects" && (
-              <ProjectsPanel
-                selectedSampleIds={selectedIds}
-                onSelectSample={handleSelectSampleById}
-              />
-            )}
-            {rightPanelMode === "duplicates" && (
-              <DuplicatesPanel
-                onSelectSample={handleSelectSampleById}
-              />
-            )}
-          </div>
-        </aside>
+              {/* Panel content */}
+              <div className="flex-1 overflow-hidden">
+                {rightPanelMode === "details" && selectedSample && (
+                  <SampleDetails sample={selectedSample} acousticTags={acousticTags} onUpdate={(updated) => {
+                    useStore.getState().updateSample(updated);
+                  }} />
+                )}
+                {rightPanelMode === "similar" && (
+                  <SimilarityPanel
+                    sample={selectedSample}
+                    onSelectSample={handleSelectSampleById}
+                  />
+                )}
+                {rightPanelMode === "projects" && (
+                  <ProjectsPanel
+                    selectedSampleIds={selectedIds}
+                    onSelectSample={handleSelectSampleById}
+                  />
+                )}
+                {rightPanelMode === "duplicates" && (
+                  <DuplicatesPanel
+                    onSelectSample={handleSelectSampleById}
+                  />
+                )}
+              </div>
+            </aside>
+          </>
+        )}
       </div>
 
       {/* Status bar */}
@@ -708,6 +1091,23 @@ function SampleDetails({ sample, acousticTags, onUpdate }: { sample: Sample; aco
           </div>
         )}
       </div>
+
+      {/* Mini radar (perceptual profile) */}
+      {getAnalysisCoverage(sample) > 0.3 && (
+        <div>
+          <div className="text-xs text-gray-400 mb-2">Perceptual Profile</div>
+          <div className="flex justify-center">
+            <MiniRadar
+              attrs={derivePerceptualAttributes(sample)}
+              color={getCategoryColor(sample.sample_type)}
+              size={120}
+              showLabels={true}
+              highlight={false}
+              unanalyzed={getAnalysisCoverage(sample) < 0.5}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Acoustic badges */}
       {acousticTags.length > 0 && (

@@ -380,7 +380,7 @@ export function WaveformView({ sample, isPlaying, progress, onSeek, onPlay }: Wa
       </div>
 
       {/* Waveform canvas */}
-      <div className="flex-1 relative" ref={containerRef}>
+      <div className="flex-1 relative min-h-[72px] max-h-[240px]" ref={containerRef}>
         {loading && (
           <div className="absolute inset-0 flex items-center justify-center bg-surface-raised rounded text-gray-500 text-sm z-10">
             Loading...
