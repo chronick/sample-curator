@@ -19,7 +19,12 @@
     "sidecar:test": "cd sidecar && uv run pytest",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:rust": "cd src-tauri && cargo test",
+    "test:rust:coverage": "cd src-tauri && cargo llvm-cov --summary-only",
+    "test:python": "cd sidecar && uv run pytest -v --tb=short",
+    "test:python:coverage": "cd sidecar && uv run pytest --cov=sample_curation_api --cov-report=term-missing -v --tb=short",
+    "test:all": "npm run test:coverage && npm run test:rust:coverage && npm run test:python:coverage"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.0.1",
