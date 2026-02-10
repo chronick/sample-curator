@@ -25,8 +25,15 @@ sample-analysis-core = { path = "../../sample-analysis/crates/sample-analysis-co
 # Library core (database, embeddings, similarity search)
 sample-library-core = { path = "../../sample-library/crates/sample-library-core" }
 
+# Automation control channel (feature-gated)
+tokio-tungstenite = { version = "0.24", optional = true }
+tokio = { version = "1", features = ["net", "sync", "macros", "rt-multi-thread", "time", "io-util"], optional = true }
+futures-util = { version = "0.3", optional = true }
+base64 = { version = "0.22", optional = true }
+
 [dev-dependencies]
 tempfile = "3.14"
 
 [features]
 default = []
+automation = ["tokio-tungstenite", "tokio", "futures-util", "base64"]

@@ -3,6 +3,8 @@
     windows_subsystem = "windows"
 )]
 
+#[cfg(feature = "automation")]
+mod automation;
 mod analysis;
 mod audio;
 mod categorization;
@@ -92,8 +94,16 @@ fn audio_get_status(state: State<'_, AppState>) -> Result<(bool, bool, f64, f64)
 }
 
 fn main() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_dialog::init())
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init());
+
+    #[cfg(feature = "automation")]
+    let builder = builder.setup(|app| {
+        automation::start(app.handle().clone());
+        Ok(())
+    });
+
+    builder
         .manage(AppState {
             sidecar: Mutex::new(None),
             audio: AudioState::new(),
