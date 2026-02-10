@@ -25,6 +25,14 @@ sample-analysis-core = { path = "../../sample-analysis/crates/sample-analysis-co
 # Library core (database, embeddings, similarity search)
 sample-library-core = { path = "../../sample-library/crates/sample-library-core" }
 
+# Audio recording (sample-recorder integration)
+cpal = "0.15"
+hound = "3.5"
+rustfft = "6.2"
+crossbeam = "0.8"
+chrono = "0.4"
+dirs = "5.0"
+
 # Automation control channel (feature-gated)
 tokio-tungstenite = { version = "0.24", optional = true }
 tokio = { version = "1", features = ["net", "sync", "macros", "rt-multi-thread", "time", "io-util"], optional = true }

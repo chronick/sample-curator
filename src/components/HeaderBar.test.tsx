@@ -117,4 +117,38 @@ describe("HeaderBar", () => {
     const btn = screen.getByTitle(/Toggle player/);
     expect(btn.className).toContain("text-accent");
   });
+
+  it("renders Record button", () => {
+    render(<HeaderBar {...defaultProps()} />);
+    expect(screen.getByText("Record")).toBeInTheDocument();
+  });
+
+  it("calls onSetActiveView with 'record' when Record clicked", () => {
+    const props = defaultProps();
+    render(<HeaderBar {...props} />);
+    fireEvent.click(screen.getByText("Record"));
+    expect(props.onSetActiveView).toHaveBeenCalledWith("record");
+  });
+
+  it("applies active style to Record when activeView is record", () => {
+    render(<HeaderBar {...defaultProps()} activeView="record" />);
+    const recordBtn = screen.getByText("Record");
+    expect(recordBtn.className).toContain("text-accent");
+  });
+
+  it("hides sidebar toggles when activeView is record", () => {
+    render(<HeaderBar {...defaultProps()} activeView="record" />);
+    expect(screen.queryByTitle(/Toggle left sidebar/)).not.toBeInTheDocument();
+    expect(screen.queryByTitle(/Toggle right sidebar/)).not.toBeInTheDocument();
+    expect(screen.queryByTitle(/Toggle player/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Import")).not.toBeInTheDocument();
+    expect(screen.queryByText("Refresh")).not.toBeInTheDocument();
+  });
+
+  it("shows sidebar toggles when activeView is browse", () => {
+    render(<HeaderBar {...defaultProps()} activeView="browse" />);
+    expect(screen.getByTitle(/Toggle left sidebar/)).toBeInTheDocument();
+    expect(screen.getByText("Import")).toBeInTheDocument();
+    expect(screen.getByText("Refresh")).toBeInTheDocument();
+  });
 });

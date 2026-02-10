@@ -13,6 +13,7 @@ mod duplicates;
 mod import_commands;
 mod jobs;
 mod projects;
+mod recorder;
 mod search;
 mod sidecar;
 mod watch;
@@ -25,6 +26,7 @@ use import_commands::ImportState;
 use jobs::JobState;
 use projects::ProjectState;
 use search::SearchState;
+use recorder::{RecorderState, RecorderConfigState};
 use sidecar::SidecarManager;
 use watch::WatchState;
 use std::sync::Mutex;
@@ -93,6 +95,173 @@ fn audio_get_status(state: State<'_, AppState>) -> Result<(bool, bool, f64, f64)
     Ok((status.is_playing, status.is_paused, status.duration, status.position))
 }
 
+// ============ Recorder Command Wrappers ============
+
+#[tauri::command]
+fn recorder_list_audio_devices() -> Result<Vec<recorder::audio_capture::AudioDevice>, String> {
+    recorder::audio_capture::list_input_devices()
+}
+
+#[tauri::command]
+fn recorder_select_device(device_id: String, state: State<'_, RecorderState>) -> Result<(), String> {
+    recorder::audio_capture::select_device(&device_id, &state)
+}
+
+#[tauri::command]
+fn recorder_start_recording(
+    config: recorder::audio_capture::RecordingConfig,
+    state: State<'_, RecorderState>,
+) -> Result<(), String> {
+    recorder::audio_capture::start_recording(config, &state)
+}
+
+#[tauri::command]
+fn recorder_stop_recording(
+    state: State<'_, RecorderState>,
+) -> Result<recorder::audio_capture::RecordingInfo, String> {
+    recorder::audio_capture::stop_recording(&state)
+}
+
+#[tauri::command]
+fn recorder_get_recording_status(state: State<'_, RecorderState>) -> Result<recorder::audio_capture::RecordingStatus, String> {
+    let is_recording = state.is_recording.load(std::sync::atomic::Ordering::Relaxed);
+    let is_monitoring = state.is_monitoring.load(std::sync::atomic::Ordering::Relaxed);
+
+    let elapsed_secs = if is_recording {
+        state
+            .recording_start
+            .lock()
+            .map_err(|e| e.to_string())?
+            .map(|s| s.elapsed().as_secs_f64())
+            .unwrap_or(0.0)
+    } else {
+        0.0
+    };
+
+    let current_file = state
+        .current_file
+        .lock()
+        .map_err(|e| e.to_string())?
+        .clone();
+
+    Ok(recorder::audio_capture::RecordingStatus {
+        is_recording,
+        is_monitoring,
+        elapsed_secs,
+        current_file,
+    })
+}
+
+#[tauri::command]
+fn recorder_get_audio_levels(state: State<'_, RecorderState>) -> Result<recorder::metering::LevelData, String> {
+    let levels = state.levels.lock().map_err(|e| e.to_string())?;
+    Ok(levels.clone())
+}
+
+#[tauri::command]
+fn recorder_get_waveform_data(
+    num_samples: Option<usize>,
+    state: State<'_, RecorderState>,
+) -> Result<Vec<f32>, String> {
+    Ok(recorder::audio_capture::get_waveform_snapshot(&state, num_samples.unwrap_or(1024)))
+}
+
+#[tauri::command]
+fn recorder_get_spectrum_data(
+    num_bins: Option<usize>,
+    state: State<'_, RecorderState>,
+) -> Result<Vec<f32>, String> {
+    Ok(recorder::audio_capture::get_spectrum_snapshot(&state, num_bins.unwrap_or(128)))
+}
+
+#[tauri::command]
+fn recorder_get_recordings_dir() -> Result<String, String> {
+    let dir = dirs::home_dir()
+        .unwrap_or_default()
+        .join(".music-hub-data")
+        .join("recordings");
+    Ok(dir.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn recorder_open_recordings_dir(config_state: State<'_, RecorderConfigState>) -> Result<(), String> {
+    let config = config_state.get()?;
+    let dir = if config.output_dir.is_empty() {
+        dirs::home_dir()
+            .unwrap_or_default()
+            .join(".music-hub-data")
+            .join("recordings")
+            .to_string_lossy()
+            .to_string()
+    } else {
+        config.output_dir
+    };
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    std::process::Command::new("open")
+        .arg(&dir)
+        .spawn()
+        .map_err(|e| format!("Failed to open directory: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn recorder_get_config(state: State<'_, RecorderConfigState>) -> Result<recorder::config::RecorderConfig, String> {
+    state.get()
+}
+
+#[tauri::command]
+fn recorder_set_config(config: recorder::config::RecorderConfig, state: State<'_, RecorderConfigState>) -> Result<(), String> {
+    state.set(config)
+}
+
+#[derive(serde::Serialize)]
+struct RecorderSaveResult {
+    sample_id: i64,
+    path: String,
+}
+
+#[tauri::command]
+fn recorder_save_to_library(
+    path: String,
+    tags: Vec<String>,
+    state: State<'_, DbState>,
+) -> Result<RecorderSaveResult, String> {
+    let db_guard = state.get_db()?;
+    let db = db_guard.as_ref().ok_or("Database not initialized")?;
+
+    // Get audio file info for duration/channels
+    let reader = hound::WavReader::open(&path).map_err(|e| format!("Failed to read WAV: {}", e))?;
+    let spec = reader.spec();
+    let duration = reader.duration() as f64 / spec.sample_rate as f64;
+
+    // Insert sample into library
+    let sample_id = db
+        .insert_sample(
+            &path,
+            Some("recorded"),
+            None,
+            Some(duration),
+            Some(spec.sample_rate as i32),
+            Some(spec.channels as i32),
+            None,
+        )
+        .map_err(|e| e.to_string())?;
+
+    // Add tags
+    for tag in &tags {
+        db.add_tag_to_sample(sample_id, tag)
+            .map_err(|e| e.to_string())?;
+    }
+
+    // Always add "recorded" tag
+    let _ = db.add_tag_to_sample(sample_id, "recorded");
+
+    Ok(RecorderSaveResult {
+        sample_id,
+        path,
+    })
+}
+
 fn main() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init());
@@ -116,6 +285,8 @@ fn main() {
         .manage(CategorizationState::new())
         .manage(DuplicateState::new())
         .manage(JobState::new())
+        .manage(RecorderState::new())
+        .manage(RecorderConfigState::new())
         .invoke_handler(tauri::generate_handler![
             sidecar_call,
             audio_play,
@@ -195,6 +366,20 @@ fn main() {
             jobs::reset_stuck_jobs,
             jobs::cleanup_old_jobs,
             jobs::list_jobs,
+            // Recorder commands
+            recorder_list_audio_devices,
+            recorder_select_device,
+            recorder_start_recording,
+            recorder_stop_recording,
+            recorder_get_recording_status,
+            recorder_get_audio_levels,
+            recorder_get_waveform_data,
+            recorder_get_spectrum_data,
+            recorder_get_recordings_dir,
+            recorder_open_recordings_dir,
+            recorder_get_config,
+            recorder_set_config,
+            recorder_save_to_library,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

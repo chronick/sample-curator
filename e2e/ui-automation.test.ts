@@ -17,6 +17,15 @@ beforeAll(async () => {
   await client.connect();
   // Clear console buffer so tests start clean
   await client.getConsole(undefined, true);
+  // Ensure we start on Browse view (another test file may have left us elsewhere)
+  const state = await client.queryState();
+  if (state.ok && state.result.state.activeView !== "browse") {
+    await client.evalJs(`
+      Array.from(document.querySelectorAll("button"))
+        .find(b => b.textContent.trim() === "Browse")?.click();
+    `);
+    await client.waitForState((s) => s.activeView === "browse");
+  }
 }, 10_000);
 
 afterAll(async () => {
@@ -32,6 +41,24 @@ describe("Navigation", () => {
     const resp = await client.queryState();
     expect(resp.ok).toBe(true);
     expect(resp.result.state.activeView).toBe("browse");
+  });
+
+  it("switches to Record view and back", async () => {
+    await client.evalJs(`
+      Array.from(document.querySelectorAll("button"))
+        .find(b => b.textContent.trim() === "Record")?.click();
+    `);
+    await client.waitForIdle();
+
+    const state = await client.waitForState((s) => s.activeView === "record");
+    expect(state.activeView).toBe("record");
+
+    // Switch back to Browse
+    await client.evalJs(`
+      Array.from(document.querySelectorAll("button"))
+        .find(b => b.textContent.trim() === "Browse")?.click();
+    `);
+    await client.waitForState((s) => s.activeView === "browse");
   });
 
   it("switches to Jobs view and back", async () => {

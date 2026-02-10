@@ -17,7 +17,7 @@ interface KeyboardShortcutsConfig {
   viewMode: ViewMode;
   tabs: Tab[];
   activeTabId: string;
-  activeView: "browse" | "jobs";
+  activeView: "browse" | "jobs" | "record";
 
   // Actions
   play: (path: string) => void;
@@ -71,6 +71,9 @@ export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {
         config.setActiveView(config.activeView === "jobs" ? "browse" : "jobs");
         return;
       }
+
+      // Don't handle single-key shortcuts when in record view (recorder has its own)
+      if (config.activeView === "record") return;
 
       switch (e.key) {
         case " ": // Space - Play/Pause

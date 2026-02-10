@@ -235,6 +235,17 @@ describe('useStore', () => {
     expect(useStore.getState().tabs[0].label).toBe('Renamed');
   });
 
+  it('setActiveView switches to record', () => {
+    useStore.getState().setActiveView('record');
+    expect(useStore.getState().activeView).toBe('record');
+  });
+
+  it('setActiveView switches back to browse', () => {
+    useStore.getState().setActiveView('record');
+    useStore.getState().setActiveView('browse');
+    expect(useStore.getState().activeView).toBe('browse');
+  });
+
   it('updateSample replaces sample in list by ID', () => {
     const samples = [makeSample({ id: 1, bpm: 120 }), makeSample({ id: 2, bpm: 130 })];
     useStore.getState().setSamples(samples, 2);

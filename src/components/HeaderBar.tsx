@@ -1,4 +1,4 @@
-type ActiveView = "browse" | "jobs";
+type ActiveView = "browse" | "jobs" | "record";
 
 interface HeaderBarProps {
   activeView: ActiveView;
@@ -53,6 +53,16 @@ export function HeaderBar({
           >
             Jobs
           </button>
+          <button
+            onClick={() => onSetActiveView("record")}
+            className={`px-3 py-1 text-xs font-medium transition-colors border-l border-surface-border ${
+              activeView === "record"
+                ? "bg-accent/20 text-accent"
+                : "hover:bg-surface-hover text-gray-400"
+            }`}
+          >
+            Record
+          </button>
         </div>
       </div>
       <div className="flex items-center gap-2">
@@ -67,6 +77,7 @@ export function HeaderBar({
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
         </button>
+        {activeView !== "record" && <>
         {/* Toggle left sidebar */}
         <button
           onClick={onToggleLeft}
@@ -124,6 +135,7 @@ export function HeaderBar({
         >
           Refresh
         </button>
+        </>}
       </div>
     </header>
   );

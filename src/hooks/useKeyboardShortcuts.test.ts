@@ -49,7 +49,7 @@ function defaultConfig() {
     viewMode: "list" as ViewMode,
     tabs: [{ id: "tab-1", label: "All" }] as Tab[],
     activeTabId: "tab-1",
-    activeView: "browse" as "browse" | "jobs",
+    activeView: "browse" as "browse" | "jobs" | "record",
     play: vi.fn(),
     pause: vi.fn(),
     resume: vi.fn(),
@@ -304,5 +304,42 @@ describe("useKeyboardShortcuts", () => {
     renderHook(() => useKeyboardShortcuts(config));
     fireKey("i", { metaKey: true });
     expect(config.setShowImport).toHaveBeenCalledWith(true);
+  });
+
+  it("Space does NOT trigger play/pause when activeView is record", () => {
+    config.activeView = "record";
+    renderHook(() => useKeyboardShortcuts(config));
+    fireKey(" ");
+    expect(config.play).not.toHaveBeenCalled();
+    expect(config.pause).not.toHaveBeenCalled();
+    expect(config.resume).not.toHaveBeenCalled();
+  });
+
+  it("single-key shortcuts are ignored when activeView is record", () => {
+    config.activeView = "record";
+    renderHook(() => useKeyboardShortcuts(config));
+    fireKey("g");
+    expect(config.setViewMode).not.toHaveBeenCalled();
+    fireKey("v");
+    expect(config.setViewMode).not.toHaveBeenCalled();
+    fireKey("s");
+    expect(config.setRightPanelMode).not.toHaveBeenCalled();
+    fireKey("d");
+    expect(config.setRightPanelMode).not.toHaveBeenCalled();
+    fireKey("p");
+    expect(config.setRightPanelMode).not.toHaveBeenCalled();
+  });
+
+  it("Cmd+B still works when activeView is record", () => {
+    config.activeView = "record";
+    renderHook(() => useKeyboardShortcuts(config));
+    fireKey("b", { metaKey: true });
+    expect(config.setShowLeft).toHaveBeenCalled();
+  });
+
+  it("Cmd+Shift+J toggles jobs view", () => {
+    renderHook(() => useKeyboardShortcuts(config));
+    fireKey("j", { metaKey: true, shiftKey: true });
+    expect(config.setActiveView).toHaveBeenCalled();
   });
 });

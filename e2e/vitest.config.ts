@@ -8,5 +8,6 @@ export default defineConfig({
     hookTimeout: 15_000,
     // Run tests sequentially — they share one app instance
     sequence: { concurrent: false },
+    fileParallelism: false,
   },
 });
