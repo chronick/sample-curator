@@ -183,6 +183,7 @@ fn main() {
             jobs::stop_job_worker,
             jobs::reset_stuck_jobs,
             jobs::cleanup_old_jobs,
+            jobs::list_jobs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -3,8 +3,10 @@
  */
 
 import { create } from "zustand";
-import type { Sample, Pack, SearchFilters, ImportProgress } from "../api/types";
+import type { Sample, Pack, SearchFilters, ImportProgress, ViewMode } from "../api/types";
 import type { Tab } from "../components/TabBar";
+
+type ActiveView = "browse" | "jobs";
 
 interface LibraryState {
   // Sample data
@@ -30,7 +32,10 @@ interface LibraryState {
   sortDirection: "asc" | "desc";
 
   // View mode
-  viewMode: "list" | "grid";
+  viewMode: ViewMode;
+
+  // Top-level view
+  activeView: ActiveView;
 
   // Tabs
   tabs: Tab[];
@@ -43,6 +48,9 @@ interface LibraryState {
   // Import state
   importJobId: string | null;
   importProgress: ImportProgress | null;
+
+  // Job stats
+  jobStats: { pending: number; running: number; complete: number; failed: number } | null;
 
   // Actions
   setSamples: (samples: Sample[], total: number) => void;
@@ -59,6 +67,8 @@ interface LibraryState {
   setError: (error: string | null) => void;
   setImportJob: (jobId: string | null) => void;
   setImportProgress: (progress: ImportProgress | null) => void;
+  setActiveView: (view: ActiveView) => void;
+  setJobStats: (stats: { pending: number; running: number; complete: number; failed: number } | null) => void;
   updateSample: (sample: Sample) => void;
   removeSamples: (ids: number[]) => void;
 
@@ -68,7 +78,7 @@ interface LibraryState {
   setSort: (field: string, direction: "asc" | "desc") => void;
 
   // View mode actions
-  setViewMode: (mode: "list" | "grid") => void;
+  setViewMode: (mode: ViewMode) => void;
 
   // Tab actions
   addTab: (tab?: Partial<Tab>) => void;
@@ -114,12 +124,14 @@ export const useStore = create<LibraryState>((set) => ({
   sortField: "applicability_score",
   sortDirection: "desc",
   viewMode: "list",
+  activeView: "browse",
   tabs: [defaultTab],
   activeTabId: defaultTabId,
   loading: false,
   error: null,
   importJobId: null,
   importProgress: null,
+  jobStats: null,
 
   // Actions
   setSamples: (samples, total) => set({ samples, totalSamples: total }),
@@ -164,6 +176,9 @@ export const useStore = create<LibraryState>((set) => ({
   setImportJob: (jobId) => set({ importJobId: jobId }),
 
   setImportProgress: (progress) => set({ importProgress: progress }),
+
+  setActiveView: (view) => set({ activeView: view }),
+  setJobStats: (stats) => set({ jobStats: stats }),
 
   updateSample: (sample) =>
     set((state) => ({

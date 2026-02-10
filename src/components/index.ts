@@ -10,3 +10,6 @@ export { DuplicatesPanel } from "./DuplicatesPanel";
 export { TabBar } from "./TabBar";
 export { SampleGrid } from "./SampleGrid";
 export { PackTree } from "./PackTree";
+export { ConstellationExplorer } from "./ConstellationExplorer";
+export { RadarComparator, MiniRadar } from "./RadarComparator";
+export { SpectralColorWheel } from "./SpectralColorWheel";

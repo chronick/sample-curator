@@ -1,5 +1,6 @@
 export { useLibrary } from "./useLibrary";
 export { usePlayer } from "./usePlayer";
+export { useKeyboardShortcuts } from "./useKeyboardShortcuts";
 export {
   useNativeWaveform,
   useNativeSpectrogram,
@@ -9,3 +10,4 @@ export {
   getNativeQuality,
   getNativeAudioInfo,
 } from "./useNativeAnalysis";
+export { useJobs } from "./useJobs";

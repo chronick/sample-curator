@@ -6,13 +6,13 @@
 //! connection since rusqlite::Connection is not Send.
 
 use sample_library_core::db::Database;
-use sample_library_core::jobs::{JobQueue, JobStats, JobWorker, JobProgress, JobType};
+use sample_library_core::jobs::{Job, JobQueue, JobStats, JobWorker, JobProgress, JobType, JobStatus};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use tauri::State;
+use tauri::{Manager, State};
 
 /// State for job queue management.
 pub struct JobState {
@@ -116,7 +116,7 @@ pub fn queue_sample_job(
 
 /// Start the background worker.
 #[tauri::command]
-pub fn start_job_worker(state: State<'_, JobState>) -> Result<bool, String> {
+pub fn start_job_worker(app_handle: tauri::AppHandle, state: State<'_, JobState>) -> Result<bool, String> {
     // Check if already running
     if state.worker_running.load(Ordering::Relaxed) {
         return Ok(false);
@@ -135,6 +135,8 @@ pub fn start_job_worker(state: State<'_, JobState>) -> Result<bool, String> {
     }
 
     state.worker_running.store(true, Ordering::Relaxed);
+
+    let app = app_handle.clone();
 
     // Spawn worker thread - creates its own database connection
     thread::spawn(move || {
@@ -158,8 +160,7 @@ pub fn start_job_worker(state: State<'_, JobState>) -> Result<bool, String> {
 
             // Process one batch of jobs
             match worker.run(|progress| {
-                // Log progress (could emit Tauri events here)
-                match progress {
+                match &progress {
                     JobProgress::Started { job_id, job_type } => {
                         println!("[Jobs] Job {} started: {:?}", job_id, job_type);
                     }
@@ -170,6 +171,8 @@ pub fn start_job_worker(state: State<'_, JobState>) -> Result<bool, String> {
                         eprintln!("[Jobs] Job {} failed: {}", job_id, error);
                     }
                 }
+                // Emit Tauri event for real-time frontend updates
+                let _ = app.emit_all("job:progress", &progress);
             }) {
                 Ok(_) => {}
                 Err(e) => {
@@ -220,4 +223,21 @@ pub fn cleanup_old_jobs(
     let db = state.open_db()?;
     let queue = JobQueue::new(Arc::new(db));
     queue.cleanup(days_old.unwrap_or(7)).map_err(|e| e.to_string())
+}
+
+/// List recent jobs with optional status filter.
+#[tauri::command]
+pub fn list_jobs(
+    limit: Option<i64>,
+    status: Option<String>,
+    state: State<'_, JobState>,
+) -> Result<Vec<Job>, String> {
+    let db = state.open_db()?;
+    let queue = JobQueue::new(Arc::new(db));
+
+    let status_filter = status.and_then(|s| JobStatus::from_str(&s));
+    let jobs = queue.list_recent_jobs(limit.unwrap_or(50), status_filter)
+        .map_err(|e| e.to_string())?;
+
+    Ok(jobs)
 }

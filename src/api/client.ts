@@ -27,6 +27,7 @@ import type {
   UpdateProjectInput,
   ExportProjectInput,
   DirectoryEntry,
+  Job,
 } from "./types";
 
 // ============ JSON-RPC (kept for future ML sidecar use) ============
@@ -426,6 +427,10 @@ export const api = {
 
   async cleanupOldJobs(daysOld?: number): Promise<number> {
     return invoke<number>("cleanup_old_jobs", { daysOld });
+  },
+
+  async listJobs(limit?: number, status?: string): Promise<Job[]> {
+    return invoke<Job[]>("list_jobs", { limit, status });
   },
 
   // ============ File Browser Commands (Native Rust) ============

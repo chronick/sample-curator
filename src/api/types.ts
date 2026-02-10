@@ -2,6 +2,8 @@
  * Core types for the Sample Curator API.
  */
 
+export type ViewMode = "list" | "grid" | "constellation" | "radar" | "colorwheel";
+
 export interface Sample {
   id: number;
   path: string;
@@ -206,4 +208,24 @@ export interface DirectoryEntry {
   path: string;
   is_directory: boolean;
   sample_id: number | null;
+}
+
+// ============ Background Jobs ============
+
+export interface Job {
+  id: number;
+  sample_id: number | null;
+  job_type: string;
+  priority: number;
+  status: "pending" | "running" | "complete" | "failed";
+  error_message: string | null;
+  created_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface JobProgressEvent {
+  Started?: { job_id: number; job_type: string };
+  Completed?: { job_id: number };
+  Failed?: { job_id: number; error: string };
 }

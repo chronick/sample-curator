@@ -3,14 +3,14 @@
  */
 
 import { useCallback } from "react";
-import type { SearchFilters } from "../api/types";
+import type { SearchFilters, ViewMode } from "../api/types";
 
 export interface Tab {
   id: string;
   label: string;
   filters: SearchFilters;
   scrollPosition: number;
-  viewMode: "list" | "grid";
+  viewMode: ViewMode;
 }
 
 interface TabBarProps {
