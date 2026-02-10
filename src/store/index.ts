@@ -290,4 +290,39 @@ export const useStore = create<LibraryState>((set) => ({
     })),
 }));
 
+// Expose serializable store snapshot for automation control channel (dev only)
+if (import.meta.env.DEV) {
+  useStore.subscribe((state) => {
+    (window as any).__STORE_STATE__ = {
+      totalSamples: state.totalSamples,
+      selectedSample: state.selectedSample
+        ? {
+            id: state.selectedSample.id,
+            path: state.selectedSample.path,
+            name: state.selectedSample.path?.split("/").pop() ?? null,
+          }
+        : null,
+      selectedCount: state.selectedIds.size,
+      filters: {
+        query: state.filters.query,
+        tags: state.filters.tags,
+        pack_id: state.filters.pack_id,
+        limit: state.filters.limit,
+        offset: state.filters.offset,
+      },
+      sortField: state.sortField,
+      sortDirection: state.sortDirection,
+      viewMode: state.viewMode,
+      activeView: state.activeView,
+      activeTabId: state.activeTabId,
+      tabCount: state.tabs.length,
+      loading: state.loading,
+      error: state.error,
+      packCount: state.packs.length,
+      tagCount: state.allTags.length,
+      jobStats: state.jobStats,
+    };
+  });
+}
+
 export default useStore;
