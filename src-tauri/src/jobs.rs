@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use tauri::{Manager, State};
+use tauri::{Emitter, State};
 
 /// State for job queue management.
 pub struct JobState {
@@ -172,7 +172,7 @@ pub fn start_job_worker(app_handle: tauri::AppHandle, state: State<'_, JobState>
                     }
                 }
                 // Emit Tauri event for real-time frontend updates
-                let _ = app.emit_all("job:progress", &progress);
+                let _ = app.emit("job:progress", &progress);
             }) {
                 Ok(_) => {}
                 Err(e) => {

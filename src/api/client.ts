@@ -5,7 +5,7 @@
  * ML operations use the Python sidecar via JSON-RPC (kept for future use).
  */
 
-import { invoke } from "@tauri-apps/api/tauri";
+import { invoke } from "@tauri-apps/api/core";
 import type {
   Sample,
   Pack,

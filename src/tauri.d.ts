@@ -1,9 +1,8 @@
-// Type declarations for Tauri globals
+// Type declarations for Tauri v2 globals
 
 interface Window {
-  __TAURI__?: {
+  __TAURI_INTERNALS__?: {
     invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
-    // Add other Tauri APIs as needed
   };
   __TAURI_IPC__?: (message: unknown) => void;
 }

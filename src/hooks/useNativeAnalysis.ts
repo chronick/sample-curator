@@ -6,7 +6,7 @@
  */
 
 import { useState, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/tauri";
+import { invoke } from "@tauri-apps/api/core";
 
 // Response types matching Rust structs in src-tauri/src/analysis.rs
 

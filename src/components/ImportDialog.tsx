@@ -3,7 +3,7 @@
  */
 
 import { useState, useEffect, useCallback } from "react";
-import { open } from "@tauri-apps/api/dialog";
+import { open } from "@tauri-apps/plugin-dialog";
 import type { ImportOptions, ImportProgress } from "../api/types";
 import { api } from "../api";
 
@@ -32,7 +32,7 @@ export function ImportDialog({ onClose, onComplete }: ImportDialogProps) {
   // Select directory
   const handleSelectDirectory = async () => {
     // Check if running inside Tauri
-    if (typeof window.__TAURI__ === "undefined") {
+    if (typeof window.__TAURI_INTERNALS__ === "undefined") {
       setError("Not running in Tauri. Please use the desktop app, not a browser.");
       return;
     }

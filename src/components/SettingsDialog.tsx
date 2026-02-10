@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/tauri";
+import { invoke } from "@tauri-apps/api/core";
 import { getNativeQuality, getNativeAudioInfo } from "../hooks/useNativeAnalysis";
 import type { SearchStats } from "../api/types";
 
@@ -26,7 +26,7 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
 
   const handleAddWatchDir = useCallback(async () => {
     try {
-      const { open } = await import("@tauri-apps/api/dialog");
+      const { open } = await import("@tauri-apps/plugin-dialog");
       const selected = await open({ directory: true, multiple: false });
       if (selected && typeof selected === "string") {
         await invoke("watch_add_directory", { path: selected });
@@ -50,7 +50,7 @@ export function SettingsDialog({ onClose }: SettingsDialogProps) {
     setTesting(true);
     setTestResult(null);
     try {
-      const { open } = await import("@tauri-apps/api/dialog");
+      const { open } = await import("@tauri-apps/plugin-dialog");
       const selected = await open({
         multiple: false,
         filters: [{ name: "Audio", extensions: ["wav", "aif", "aiff", "flac", "mp3", "ogg"] }],

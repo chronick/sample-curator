@@ -101,7 +101,7 @@ function AppContent() {
 
   // Check for Tauri context
   useEffect(() => {
-    if (typeof window.__TAURI__ === "undefined") {
+    if (typeof window.__TAURI_INTERNALS__ === "undefined") {
       setInitError("Not running in Tauri context. Please use the desktop app.");
     }
   }, []);
@@ -155,7 +155,7 @@ function AppContent() {
     if (selectedSample) {
       api.findSimilar(selectedSample.id, 1).catch(() => {}); // warm up
       // Try to get acoustic tags
-      import("@tauri-apps/api/tauri").then(({ invoke }) => {
+      import("@tauri-apps/api/core").then(({ invoke }) => {
         invoke<{ tags: string[] }>("get_acoustic_tags", { sampleId: selectedSample.id })
           .then((result) => setAcousticTags(result.tags || []))
           .catch(() => setAcousticTags([]));
