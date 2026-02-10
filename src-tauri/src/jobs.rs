@@ -241,3 +241,98 @@ pub fn list_jobs(
 
     Ok(jobs)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_job_state_default() {
+        let state = JobState::default();
+        assert!(!state.worker_running.load(Ordering::Relaxed));
+        let guard = state.worker_stop.lock().unwrap();
+        assert!(guard.is_none());
+    }
+
+    #[test]
+    fn test_job_status_response_serialization() {
+        let response = JobStatusResponse {
+            stats: JobStats {
+                pending: 10,
+                running: 2,
+                complete: 100,
+                failed: 3,
+            },
+            worker_running: true,
+        };
+
+        let json = serde_json::to_string(&response).unwrap();
+        let deserialized: JobStatusResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.stats.pending, 10);
+        assert_eq!(deserialized.stats.running, 2);
+        assert_eq!(deserialized.stats.complete, 100);
+        assert_eq!(deserialized.stats.failed, 3);
+        assert!(deserialized.worker_running);
+    }
+
+    #[test]
+    fn test_job_type_parsing_valid() {
+        // Test the job type string-to-enum mapping used in queue_sample_job
+        let valid_types = vec![
+            ("embedding", "Embedding"),
+            ("spectral", "Spectral"),
+            ("full", "Full"),
+            ("clap", "Clap"),
+        ];
+        for (input, _expected) in valid_types {
+            let result = match input {
+                "embedding" => Ok(JobType::Embedding),
+                "spectral" => Ok(JobType::Spectral),
+                "full" => Ok(JobType::Full),
+                "clap" => Ok(JobType::Clap),
+                _ => Err(format!("Unknown job type: {}", input)),
+            };
+            assert!(result.is_ok(), "Failed to parse job type: {}", input);
+        }
+    }
+
+    #[test]
+    fn test_job_type_parsing_invalid() {
+        let input = "unknown_type";
+        let result: Result<JobType, String> = match input {
+            "embedding" => Ok(JobType::Embedding),
+            "spectral" => Ok(JobType::Spectral),
+            "full" => Ok(JobType::Full),
+            "clap" => Ok(JobType::Clap),
+            _ => Err(format!("Unknown job type: {}", input)),
+        };
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unknown_type"));
+    }
+
+    #[test]
+    fn test_worker_stop_flag() {
+        let state = JobState::default();
+
+        // Initially not running
+        assert!(!state.worker_running.load(Ordering::Relaxed));
+
+        // Simulate starting
+        state.worker_running.store(true, Ordering::Relaxed);
+        assert!(state.worker_running.load(Ordering::Relaxed));
+
+        // Set stop flag
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        {
+            let mut guard = state.worker_stop.lock().unwrap();
+            *guard = Some(Arc::clone(&stop_flag));
+        }
+
+        // Signal stop
+        stop_flag.store(true, Ordering::Relaxed);
+        state.worker_running.store(false, Ordering::Relaxed);
+
+        assert!(!state.worker_running.load(Ordering::Relaxed));
+        assert!(stop_flag.load(Ordering::Relaxed));
+    }
+}

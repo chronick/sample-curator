@@ -462,4 +462,97 @@ mod tests {
         progress.phase = "complete".to_string();
         assert_eq!(progress.phase, "complete");
     }
+
+    #[test]
+    fn test_import_progress_error_accumulation() {
+        let mut progress = ImportProgress::default();
+        assert!(progress.errors.is_empty());
+
+        progress.errors.push(("file1.wav".to_string(), "corrupt".to_string()));
+        progress.errors.push(("file2.wav".to_string(), "unsupported format".to_string()));
+
+        assert_eq!(progress.errors.len(), 2);
+        assert_eq!(progress.errors[0].0, "file1.wav");
+        assert_eq!(progress.errors[1].1, "unsupported format");
+    }
+
+    #[test]
+    fn test_import_progress_serialization() {
+        let mut progress = ImportProgress::default();
+        progress.phase = "importing".to_string();
+        progress.current = 5;
+        progress.total = 10;
+        progress.current_file = "test.wav".to_string();
+        progress.imported_count = 4;
+        progress.duplicates_skipped = 1;
+
+        let json = serde_json::to_string(&progress).unwrap();
+        let deserialized: ImportProgress = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.phase, "importing");
+        assert_eq!(deserialized.current, 5);
+        assert_eq!(deserialized.total, 10);
+        assert_eq!(deserialized.imported_count, 4);
+        assert_eq!(deserialized.duplicates_skipped, 1);
+    }
+
+    #[test]
+    fn test_import_state_new() {
+        let state = ImportState::new();
+        let jobs = state.jobs.lock().unwrap();
+        assert!(jobs.is_empty());
+        let flags = state.cancel_flags.lock().unwrap();
+        assert!(flags.is_empty());
+    }
+
+    #[test]
+    fn test_import_state_default() {
+        let state = ImportState::default();
+        let jobs = state.jobs.lock().unwrap();
+        assert!(jobs.is_empty());
+    }
+
+    #[test]
+    fn test_import_options_input_deserialization() {
+        let json = r#"{"recursive": true, "analyze": false}"#;
+        let input: ImportOptionsInput = serde_json::from_str(json).unwrap();
+        assert_eq!(input.recursive, Some(true));
+        assert_eq!(input.analyze, Some(false));
+        assert_eq!(input.detect_duplicates, None);
+    }
+
+    #[test]
+    fn test_import_options_defaults() {
+        // Test the default unwrapping used in import_start
+        let input = ImportOptionsInput {
+            recursive: None,
+            analyze: None,
+            detect_duplicates: None,
+        };
+        let recursive = input.recursive.unwrap_or(true);
+        let analyze = input.analyze.unwrap_or(true);
+        let detect_dup = input.detect_duplicates.unwrap_or(true);
+        assert!(recursive);
+        assert!(analyze);
+        assert!(detect_dup);
+    }
+
+    #[test]
+    fn test_detect_pack_name_unicode() {
+        let import_root = Path::new("/samples");
+        let file_path = Path::new("/samples/Björk Samples/kick.wav");
+        let result = detect_pack_name(file_path, import_root);
+        assert!(result.is_some());
+        let (_, name) = result.unwrap();
+        assert_eq!(name, "Björk Samples");
+    }
+
+    #[test]
+    fn test_detect_pack_name_spaces() {
+        let import_root = Path::new("/my samples");
+        let file_path = Path::new("/my samples/Cool Pack/sub/kick.wav");
+        let result = detect_pack_name(file_path, import_root);
+        assert!(result.is_some());
+        let (_, name) = result.unwrap();
+        assert_eq!(name, "Cool Pack");
+    }
 }

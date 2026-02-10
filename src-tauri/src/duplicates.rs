@@ -232,3 +232,117 @@ pub fn resolve_duplicate_group(
 
     Ok(deleted)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_duplicate_state_new() {
+        let state = DuplicateState::new();
+        let guard = state.db.lock().unwrap();
+        assert!(guard.is_none());
+    }
+
+    #[test]
+    fn test_duplicate_state_default() {
+        let state = DuplicateState::default();
+        let guard = state.db.lock().unwrap();
+        assert!(guard.is_none());
+    }
+
+    #[test]
+    fn test_duplicate_group_serialization() {
+        let group = DuplicateGroup {
+            fingerprint_hash: "abc123".to_string(),
+            samples: vec![
+                DuplicateSample {
+                    id: 1,
+                    path: "/samples/kick.wav".to_string(),
+                    size_bytes: 1000,
+                    quality_score: Some(0.9),
+                    created_at: Some("2024-01-01".to_string()),
+                },
+                DuplicateSample {
+                    id: 2,
+                    path: "/samples/kick_copy.wav".to_string(),
+                    size_bytes: 1000,
+                    quality_score: None,
+                    created_at: None,
+                },
+            ],
+            total_size_bytes: 2000,
+            potential_savings_bytes: 1000,
+        };
+
+        let json = serde_json::to_string(&group).unwrap();
+        let deserialized: DuplicateGroup = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.fingerprint_hash, "abc123");
+        assert_eq!(deserialized.samples.len(), 2);
+        assert_eq!(deserialized.total_size_bytes, 2000);
+        assert_eq!(deserialized.potential_savings_bytes, 1000);
+    }
+
+    #[test]
+    fn test_duplicate_sample_serialization() {
+        let sample = DuplicateSample {
+            id: 42,
+            path: "/samples/test.wav".to_string(),
+            size_bytes: 5000,
+            quality_score: Some(0.85),
+            created_at: Some("2024-06-15".to_string()),
+        };
+
+        let json = serde_json::to_string(&sample).unwrap();
+        let deserialized: DuplicateSample = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.id, 42);
+        assert_eq!(deserialized.size_bytes, 5000);
+        assert_eq!(deserialized.quality_score, Some(0.85));
+    }
+
+    #[test]
+    fn test_duplicate_stats_serialization() {
+        let stats = DuplicateStats {
+            total_groups: 5,
+            total_duplicates: 12,
+            potential_savings_bytes: 50000,
+        };
+
+        let json = serde_json::to_string(&stats).unwrap();
+        let deserialized: DuplicateStats = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.total_groups, 5);
+        assert_eq!(deserialized.total_duplicates, 12);
+        assert_eq!(deserialized.potential_savings_bytes, 50000);
+    }
+
+    #[test]
+    fn test_savings_calculation() {
+        // Simulates the savings calculation logic from get_duplicate_groups
+        let sizes: Vec<u64> = vec![1000, 1000, 500];
+        let total_size: u64 = sizes.iter().sum();
+        let max_size = sizes.iter().max().copied().unwrap_or(0);
+        let savings = total_size.saturating_sub(max_size);
+
+        assert_eq!(total_size, 2500);
+        assert_eq!(max_size, 1000);
+        assert_eq!(savings, 1500);
+    }
+
+    #[test]
+    fn test_savings_single_file() {
+        let sizes: Vec<u64> = vec![1000];
+        let total_size: u64 = sizes.iter().sum();
+        let max_size = sizes.iter().max().copied().unwrap_or(0);
+        let savings = total_size.saturating_sub(max_size);
+        assert_eq!(savings, 0);
+    }
+
+    #[test]
+    fn test_savings_identical_sizes() {
+        let sizes: Vec<u64> = vec![500, 500, 500];
+        let total_size: u64 = sizes.iter().sum();
+        let max_size = sizes.iter().max().copied().unwrap_or(0);
+        let savings = total_size.saturating_sub(max_size);
+        assert_eq!(savings, 1000);
+    }
+}

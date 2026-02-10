@@ -18,7 +18,8 @@
     "sidecar:sync:full": "cd sidecar && uv sync --python 3.11 --extra fingerprint --extra segmentation",
     "sidecar:test": "cd sidecar && uv run pytest",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.0.1",
@@ -31,11 +32,13 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
-    "@types/three": "^0.172.0",
     "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
     "@types/react": "^18.2.45",
     "@types/react-dom": "^18.2.18",
+    "@types/three": "^0.172.0",
     "@vitejs/plugin-react": "^4.2.1",
+    "@vitest/coverage-v8": "^4.0.18",
     "autoprefixer": "^10.4.16",
     "eslint": "^8.56.0",
     "eslint-plugin-react-hooks": "^4.6.0",

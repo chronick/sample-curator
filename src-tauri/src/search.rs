@@ -269,3 +269,133 @@ mod dirs {
         std::env::var_os("HOME").map(std::path::PathBuf::from)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_search_aspects_from_full() {
+        let input = SearchAspectsInput {
+            timbre: Some(0.5),
+            pitch: Some(0.8),
+            amplitude: Some(0.3),
+            spectrum: Some(0.9),
+        };
+        let aspects: SearchAspects = input.into();
+        assert_eq!(aspects.timbre, 0.5);
+        assert_eq!(aspects.pitch, 0.8);
+        assert_eq!(aspects.amplitude, 0.3);
+        assert_eq!(aspects.spectrum, 0.9);
+    }
+
+    #[test]
+    fn test_search_aspects_from_defaults() {
+        let input = SearchAspectsInput {
+            timbre: None,
+            pitch: None,
+            amplitude: None,
+            spectrum: None,
+        };
+        let aspects: SearchAspects = input.into();
+        assert_eq!(aspects.timbre, 1.0);
+        assert_eq!(aspects.pitch, 1.0);
+        assert_eq!(aspects.amplitude, 1.0);
+        assert_eq!(aspects.spectrum, 1.0);
+    }
+
+    #[test]
+    fn test_search_aspects_from_partial() {
+        let input = SearchAspectsInput {
+            timbre: Some(0.5),
+            pitch: None,
+            amplitude: Some(0.3),
+            spectrum: None,
+        };
+        let aspects: SearchAspects = input.into();
+        assert_eq!(aspects.timbre, 0.5);
+        assert_eq!(aspects.pitch, 1.0);
+        assert_eq!(aspects.amplitude, 0.3);
+        assert_eq!(aspects.spectrum, 1.0);
+    }
+
+    #[test]
+    fn test_compatibility_criteria_from_full() {
+        let input = CompatibilityCriteriaInput {
+            check_key: Some(false),
+            check_bpm: Some(false),
+            check_frequency: Some(false),
+            check_dynamics: Some(false),
+            bpm_tolerance: Some(0.1),
+        };
+        let criteria: CompatibilityCriteria = input.into();
+        assert!(!criteria.check_key);
+        assert!(!criteria.check_bpm);
+        assert!(!criteria.check_frequency);
+        assert!(!criteria.check_dynamics);
+        assert_eq!(criteria.bpm_tolerance, 0.1);
+    }
+
+    #[test]
+    fn test_compatibility_criteria_from_defaults() {
+        let input = CompatibilityCriteriaInput {
+            check_key: None,
+            check_bpm: None,
+            check_frequency: None,
+            check_dynamics: None,
+            bpm_tolerance: None,
+        };
+        let criteria: CompatibilityCriteria = input.into();
+        assert!(criteria.check_key);
+        assert!(criteria.check_bpm);
+        assert!(criteria.check_frequency);
+        assert!(criteria.check_dynamics);
+        assert_eq!(criteria.bpm_tolerance, 0.05);
+    }
+
+    #[test]
+    fn test_search_aspects_input_serialization() {
+        let input = SearchAspectsInput {
+            timbre: Some(0.5),
+            pitch: None,
+            amplitude: Some(1.0),
+            spectrum: None,
+        };
+        let json = serde_json::to_string(&input).unwrap();
+        let deserialized: SearchAspectsInput = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.timbre, Some(0.5));
+        assert_eq!(deserialized.pitch, None);
+    }
+
+    #[test]
+    fn test_compatibility_criteria_input_serialization() {
+        let input = CompatibilityCriteriaInput {
+            check_key: Some(true),
+            check_bpm: Some(false),
+            check_frequency: None,
+            check_dynamics: None,
+            bpm_tolerance: Some(0.1),
+        };
+        let json = serde_json::to_string(&input).unwrap();
+        let deserialized: CompatibilityCriteriaInput = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.check_key, Some(true));
+        assert_eq!(deserialized.check_bpm, Some(false));
+        assert_eq!(deserialized.bpm_tolerance, Some(0.1));
+    }
+
+    #[test]
+    fn test_search_stats_serialization() {
+        let stats = SearchStats {
+            total_samples: 1000,
+            total_embeddings: 800,
+            index_size: 500,
+            index_loaded: true,
+        };
+        let json = serde_json::to_string(&stats).unwrap();
+        let deserialized: SearchStats = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.total_samples, 1000);
+        assert_eq!(deserialized.total_embeddings, 800);
+        assert_eq!(deserialized.index_size, 500);
+        assert!(deserialized.index_loaded);
+    }
+}

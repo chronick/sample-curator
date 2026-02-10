@@ -243,3 +243,104 @@ pub fn export_project_command(
 
     export_project(db, project_id, &options).map_err(|e| e.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_project_state_new() {
+        let state = ProjectState::new();
+        let guard = state.db.lock().unwrap();
+        assert!(guard.is_none());
+    }
+
+    #[test]
+    fn test_project_state_default() {
+        let state = ProjectState::default();
+        let guard = state.db.lock().unwrap();
+        assert!(guard.is_none());
+    }
+
+    #[test]
+    fn test_create_project_input_serialization() {
+        let input = CreateProjectInput {
+            name: "Techno Set".to_string(),
+            description: Some("Dark techno for club night".to_string()),
+            bpm_target: Some(135.0),
+            key_target: Some("Am".to_string()),
+        };
+
+        let json = serde_json::to_string(&input).unwrap();
+        let deserialized: CreateProjectInput = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.name, "Techno Set");
+        assert_eq!(deserialized.bpm_target, Some(135.0));
+        assert_eq!(deserialized.key_target, Some("Am".to_string()));
+    }
+
+    #[test]
+    fn test_create_project_input_minimal() {
+        let json = r#"{"name":"Minimal"}"#;
+        let input: CreateProjectInput = serde_json::from_str(json).unwrap();
+        assert_eq!(input.name, "Minimal");
+        assert!(input.description.is_none());
+        assert!(input.bpm_target.is_none());
+        assert!(input.key_target.is_none());
+    }
+
+    #[test]
+    fn test_update_project_input_serialization() {
+        let input = UpdateProjectInput {
+            name: Some("Renamed".to_string()),
+            description: None,
+            bpm_target: Some(128.0),
+            key_target: None,
+        };
+
+        let json = serde_json::to_string(&input).unwrap();
+        let deserialized: UpdateProjectInput = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.name, Some("Renamed".to_string()));
+        assert_eq!(deserialized.bpm_target, Some(128.0));
+    }
+
+    #[test]
+    fn test_add_sample_input_serialization() {
+        let input = AddSampleInput {
+            notes: Some("Main kick".to_string()),
+            role: Some("kick".to_string()),
+        };
+
+        let json = serde_json::to_string(&input).unwrap();
+        let deserialized: AddSampleInput = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.notes, Some("Main kick".to_string()));
+        assert_eq!(deserialized.role, Some("kick".to_string()));
+    }
+
+    #[test]
+    fn test_export_project_input_serialization() {
+        let input = ExportProjectInput {
+            output_dir: "/output/set".to_string(),
+            naming_pattern: Some("{project}_{index}".to_string()),
+            copy_files: Some(true),
+        };
+
+        let json = serde_json::to_string(&input).unwrap();
+        let deserialized: ExportProjectInput = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.output_dir, "/output/set");
+        assert_eq!(deserialized.copy_files, Some(true));
+    }
+
+    #[test]
+    fn test_export_defaults() {
+        // Test the default values used in export_project_command
+        let input = ExportProjectInput {
+            output_dir: "/out".to_string(),
+            naming_pattern: None,
+            copy_files: None,
+        };
+        let naming = input.naming_pattern.unwrap_or_else(|| "{project}_{role}_{index}".to_string());
+        let copy = input.copy_files.unwrap_or(true);
+        assert_eq!(naming, "{project}_{role}_{index}");
+        assert!(copy);
+    }
+}
