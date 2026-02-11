@@ -7,51 +7,37 @@ Desktop application for browsing, importing, tagging, and managing audio samples
 **Tech**: Tauri (Rust) + React/TypeScript + Python JSON-RPC sidecar
 **Purpose**: GUI for sample library management with waveform preview and batch operations
 
-## Design Philosophy: Thin Client
+## Design Philosophy: Self-Contained Hub
 
-**Keep sample-curator as a thin client.** Non-trivial Python code (audio processing, analysis algorithms, DSP) belongs in `sample-analysis` or `sample-library`, not here.
+Sample-curator is the primary hub for sample management. The Rust crates (`sample-analysis-core`, `sample-library-core`) now live locally under `src-tauri/crates/`, and Python packages (`sample_analysis`, `sample_library`) are vendored in `sidecar/vendor/`.
 
-The sidecar's `handlers.py` should:
-- **Do**: Wire up calls to `sample-library` and `sample-analysis` APIs
-- **Do**: Handle JSON-RPC protocol, sessions, error mapping
-- **Don't**: Implement audio algorithms directly (use `sample-analysis`)
-- **Don't**: Duplicate logic that exists in sibling packages
-
-Example - **Good** (delegates to sample-analysis):
-```python
-def get_spectrogram(id: int, width: int, height: int) -> dict:
-    from sample_analysis import get_analyzer
-    analyzer = get_analyzer("spectrogram")
-    result = analyzer.analyze(filepath, width=width, height=height)
-    return result.model_dump()
-```
-
-Example - **Bad** (implements algorithm inline):
-```python
-def get_spectrogram(id: int, width: int, height: int) -> dict:
-    import librosa
-    mel_spec = librosa.feature.melspectrogram(...)  # Don't do this here
-    # ... 50 lines of DSP code ...
-```
+- **Rust crates**: DB operations, audio analysis, and similarity search run natively via Tauri commands
+- **Python sidecar**: Reserved for future ML features (CLAP embeddings, semantic search, stem separation)
+- **Vendor dir**: Contains Python packages for when ML features need `sample_analysis`/`sample_library` APIs
 
 ## Architecture
 
 ```
 sample-curator/
-├── src/                     # React frontend (Vite + TypeScript)
-│   ├── components/          # UI components
-│   ├── hooks/               # React hooks (useRpc, useLibrary, etc.)
-│   ├── stores/              # Zustand state management
-│   └── types/               # TypeScript interfaces
-├── src-tauri/               # Tauri shell (Rust)
-│   ├── src/main.rs          # Rust entry point, sidecar spawn
-│   └── tauri.conf.json      # App config
-└── sidecar/                 # Python backend
-    ├── pyproject.toml       # Python dependencies
-    └── sample_curation_api/ # JSON-RPC handlers
-        ├── __init__.py      # Entry point + main loop
-        ├── handlers.py      # RPC method implementations
-        └── utils.py         # Audio utilities (waveform gen)
+├── src/                           # React frontend (Vite + TypeScript)
+│   ├── components/                # UI components
+│   ├── hooks/                     # React hooks (useRpc, useLibrary, etc.)
+│   ├── stores/                    # Zustand state management
+│   └── types/                     # TypeScript interfaces
+├── src-tauri/                     # Tauri shell (Rust)
+│   ├── Cargo.toml                 # Workspace root + app package
+│   ├── src/                       # Tauri app code
+│   └── crates/
+│       ├── sample-analysis-core/  # Audio analysis (BPM, key, spectral, etc.)
+│       └── sample-library-core/   # DB, embeddings, similarity search
+└── sidecar/                       # Python backend (ML features)
+    ├── pyproject.toml             # Python dependencies
+    ├── sample_curation_api/       # JSON-RPC handlers
+    │   ├── __init__.py            # Entry point + main loop
+    │   └── handlers.py            # RPC method implementations
+    └── vendor/                    # Vendored Python packages
+        ├── sample_analysis/       # Python analysis API (for future ML features)
+        └── sample_library/        # Python library API (for future ML features)
 ```
 
 ## Quick Start
@@ -225,6 +211,6 @@ Optional extras for heavy features:
 
 ## Integration Points
 
-- **sample-library**: Database and import logic
-- **sample-analysis**: Analyzers for BPM, key, quality metrics
+- **sample-library-core** (Rust crate, local): Database and import logic — `src-tauri/crates/sample-library-core/`
+- **sample-analysis-core** (Rust crate, local): Analyzers for BPM, key, quality metrics — `src-tauri/crates/sample-analysis-core/`
 - **music-hub**: Can be launched via `music-hub curate` command

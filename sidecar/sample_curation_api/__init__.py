@@ -6,7 +6,13 @@ ML-only sidecar. DB operations are handled by native Rust Tauri commands.
 import json
 import sys
 import traceback
+from pathlib import Path
 from typing import Any
+
+# Ensure vendored packages (sample_analysis, sample_library) are importable
+_vendor_dir = Path(__file__).resolve().parent.parent / "vendor"
+if str(_vendor_dir) not in sys.path:
+    sys.path.insert(0, str(_vendor_dir))
 
 try:
     from sample_curation_api.handlers import HANDLERS
