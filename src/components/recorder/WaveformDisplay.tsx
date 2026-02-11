@@ -7,13 +7,13 @@ export function WaveformDisplay() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const waveformData = useRecorderStore((s) => s.waveformData);
   const isRecording = useRecorderStore((s) => s.isRecording);
-  const recordingWaveform = useRecorderStore((s) => s.recordingWaveform);
 
   useCanvasResize(canvasRef);
 
-  // Both hooks always called (React rules) — they receive empty data for the inactive mode.
+  // Live waveform: passes empty data when recording (renderer is a no-op for [])
   useWaveformRenderer(canvasRef, isRecording ? [] : waveformData);
-  useRecordingWaveformRenderer(canvasRef, isRecording ? recordingWaveform : null);
+  // Recording waveform: runs its own rAF loop, reads from store.getState() — no re-renders
+  useRecordingWaveformRenderer(canvasRef, isRecording);
 
   return (
     <div>

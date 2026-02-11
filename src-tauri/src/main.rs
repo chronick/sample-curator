@@ -236,7 +236,11 @@ fn recorder_save_to_library(
     path: String,
     tags: Vec<String>,
     state: State<'_, DbState>,
+    recorder_state: State<'_, RecorderState>,
 ) -> Result<RecorderSaveResult, String> {
+    // Wait for writer thread to finish flushing the WAV before reading it
+    recorder::audio_capture::wait_for_writer(&recorder_state, 30_000)?;
+
     let db_guard = state.get_db()?;
     let db = db_guard.as_ref().ok_or("Database not initialized")?;
 
@@ -277,19 +281,42 @@ fn recorder_save_to_library(
     // Always add "recorded" tag
     let _ = db.add_tag_to_sample(sample_id, "recorded");
 
-    // Select pipeline based on tags and run analysis
-    let tag_refs: Vec<&str> = tags.iter().map(|s| s.as_str()).collect();
-    let pipeline = analysis_pipeline::pipeline_for_tags(&tag_refs);
-    let analysis_result = analysis_pipeline::analyze_sample(db, sample_id, &path, pipeline);
-
     let pack_name = pack_id.and_then(|pid| {
         db.get_pack(pid).ok().flatten().map(|p| p.name)
+    });
+
+    // Release DB lock before spawning background analysis
+    drop(db_guard);
+
+    // Spawn analysis on a completely separate thread (off the Tauri thread pool).
+    // Opens its own DB connection so the IPC pool stays free for UI commands.
+    let analysis_path = path.clone();
+    let analysis_tags = tags;
+    std::thread::spawn(move || {
+        let db_path = dirs::home_dir()
+            .unwrap_or_default()
+            .join(".music-hub-data")
+            .join("sample-library")
+            .join("library.db");
+        let db = match sample_library_core::db::Database::open(&db_path) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("Background analysis: failed to open DB: {}", e);
+                return;
+            }
+        };
+        let tag_refs: Vec<&str> = analysis_tags.iter().map(|s| s.as_str()).collect();
+        let pipeline = analysis_pipeline::pipeline_for_tags(&tag_refs);
+        let result = analysis_pipeline::analyze_sample(&db, sample_id, &analysis_path, pipeline);
+        if !result.errors.is_empty() {
+            eprintln!("Background analysis errors: {:?}", result.errors);
+        }
     });
 
     Ok(RecorderSaveResult {
         sample_id,
         path,
-        analyzed: analysis_result.analyzed,
+        analyzed: false, // analysis runs async in background
         pack_name,
     })
 }

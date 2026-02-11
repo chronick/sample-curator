@@ -29,6 +29,10 @@ export function useWaveformRenderer(
     const canvas = canvasRef.current;
     if (!canvas) return;
 
+    // When data is empty (e.g. during recording), don't touch the canvas at all
+    // — the recording waveform renderer draws on the same canvas.
+    if (data.length === 0) return;
+
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
@@ -44,8 +48,6 @@ export function useWaveformRenderer(
     ctx.moveTo(0, height / 2);
     ctx.lineTo(width, height / 2);
     ctx.stroke();
-
-    if (data.length === 0) return;
 
     // Auto-gain: find peak and scale so it fills ~80% of the canvas
     let peak = 0;

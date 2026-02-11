@@ -10,6 +10,8 @@ use std::thread::JoinHandle;
 use std::time::Instant;
 
 const RING_BUFFER_SIZE: usize = 48000 * 2; // ~1 second at 48kHz stereo
+const RECORDING_CHUNK_SIZE: usize = 2048; // ~42ms at 48kHz mono — one FFT window per chunk
+const MAX_RECORDING_CHUNKS: usize = 48000 * 600 / RECORDING_CHUNK_SIZE; // ~14k chunks ≈ 10 min
 
 // cpal::Stream is !Send on macOS due to CoreAudio internals, but it's safe
 // to hold across threads when wrapped in a Mutex (we never use it concurrently).
@@ -52,6 +54,125 @@ pub struct RecordingStatus {
     pub current_file: Option<String>,
 }
 
+/// Incrementally computed recording waveform data.
+/// Audio is processed into fixed-size chunks as it arrives in the audio callback.
+/// Each chunk stores a pre-computed peak and spectral centroid.
+/// Query-time binning into display bars is O(num_chunks) simple arithmetic — no FFT.
+pub struct RecordingWaveformCache {
+    chunk_peaks: Vec<f32>,
+    chunk_centroids: Vec<f32>,
+    current_chunk: Vec<f32>,
+    current_chunk_peak: f32,
+    sample_rate: u32,
+    num_channels: u16,
+}
+
+impl RecordingWaveformCache {
+    pub fn new() -> Self {
+        Self {
+            chunk_peaks: Vec::new(),
+            chunk_centroids: Vec::new(),
+            current_chunk: Vec::with_capacity(RECORDING_CHUNK_SIZE),
+            current_chunk_peak: 0.0,
+            sample_rate: 48000,
+            num_channels: 2,
+        }
+    }
+
+    pub fn clear(&mut self, sample_rate: u32, num_channels: u16) {
+        self.chunk_peaks.clear();
+        self.chunk_centroids.clear();
+        self.current_chunk.clear();
+        self.current_chunk_peak = 0.0;
+        self.sample_rate = sample_rate;
+        self.num_channels = num_channels;
+    }
+
+    /// Process interleaved audio: mix to mono, accumulate peaks and centroids per chunk.
+    pub fn push_samples(&mut self, interleaved: &[f32]) {
+        if self.chunk_peaks.len() >= MAX_RECORDING_CHUNKS {
+            return;
+        }
+        let nc = self.num_channels.max(1) as usize;
+
+        let mut i = 0;
+        while i + nc <= interleaved.len() {
+            let mono: f32 = interleaved[i..i + nc].iter().sum::<f32>() / nc as f32;
+            let abs = mono.abs();
+            if abs > self.current_chunk_peak {
+                self.current_chunk_peak = abs;
+            }
+            self.current_chunk.push(mono);
+            if self.current_chunk.len() >= RECORDING_CHUNK_SIZE {
+                self.finalize_chunk();
+                if self.chunk_peaks.len() >= MAX_RECORDING_CHUNKS {
+                    return;
+                }
+            }
+            i += nc;
+        }
+    }
+
+    fn finalize_chunk(&mut self) {
+        let centroid =
+            visualization::compute_spectral_centroid(&self.current_chunk, self.sample_rate);
+        self.chunk_peaks.push(self.current_chunk_peak);
+        self.chunk_centroids.push(centroid);
+        self.current_chunk.clear();
+        self.current_chunk_peak = 0.0;
+    }
+
+    /// Bin pre-computed chunks into num_bars bars for display.
+    pub fn get_waveform(&self, num_bars: usize) -> visualization::RecordingWaveformData {
+        let total_chunks = self.chunk_peaks.len();
+        if total_chunks == 0 {
+            return visualization::RecordingWaveformData {
+                peaks: vec![],
+                centroids: vec![],
+                duration: 0.0,
+            };
+        }
+
+        let total_mono_samples = total_chunks * RECORDING_CHUNK_SIZE + self.current_chunk.len();
+        let duration = total_mono_samples as f64 / self.sample_rate as f64;
+
+        // Fewer chunks than bars — return chunk data directly
+        if total_chunks <= num_bars {
+            return visualization::RecordingWaveformData {
+                peaks: self.chunk_peaks.clone(),
+                centroids: self.chunk_centroids.clone(),
+                duration,
+            };
+        }
+
+        // Bin chunks into bars
+        let mut peaks = Vec::with_capacity(num_bars);
+        let mut centroids = Vec::with_capacity(num_bars);
+        let chunks_per_bar = total_chunks as f64 / num_bars as f64;
+
+        for bar in 0..num_bars {
+            let start = (bar as f64 * chunks_per_bar) as usize;
+            let end = (((bar + 1) as f64 * chunks_per_bar) as usize).min(total_chunks);
+            let count = (end - start).max(1);
+
+            let mut max_peak = 0.0_f32;
+            let mut centroid_sum = 0.0_f32;
+            for i in start..end {
+                max_peak = max_peak.max(self.chunk_peaks[i]);
+                centroid_sum += self.chunk_centroids[i];
+            }
+            peaks.push(max_peak);
+            centroids.push(centroid_sum / count as f32);
+        }
+
+        visualization::RecordingWaveformData {
+            peaks,
+            centroids,
+            duration,
+        }
+    }
+}
+
 pub struct RecorderState {
     // Input monitoring (always-on when device selected)
     stream: Mutex<Option<SendStream>>,
@@ -74,9 +195,12 @@ pub struct RecorderState {
     pub current_file: Mutex<Option<String>>,
     recording_config: Mutex<Option<RecordingConfig>>,
 
-    // Recording waveform accumulation buffer (grows during recording)
-    pub recording_waveform_buffer: Arc<Mutex<Vec<f32>>>,
-    pub recording_waveform_channels: Arc<AtomicU16>,
+    // Set to true once the writer thread has finished flushing + finalizing the WAV.
+    // Used by save_to_library to know when the file is safe to read.
+    pub writer_finalized: Arc<AtomicBool>,
+
+    // Incremental recording waveform cache (peaks + centroids computed per chunk)
+    pub recording_waveform_cache: Arc<Mutex<RecordingWaveformCache>>,
 }
 
 impl RecorderState {
@@ -99,8 +223,9 @@ impl RecorderState {
             current_file: Mutex::new(None),
             recording_config: Mutex::new(None),
 
-            recording_waveform_buffer: Arc::new(Mutex::new(Vec::new())),
-            recording_waveform_channels: Arc::new(AtomicU16::new(2)),
+            writer_finalized: Arc::new(AtomicBool::new(true)),
+
+            recording_waveform_cache: Arc::new(Mutex::new(RecordingWaveformCache::new())),
         }
     }
 }
@@ -185,6 +310,11 @@ fn smooth_levels(raw: &LevelData, prev: &LevelData) -> LevelData {
 }
 
 /// Common callback logic: convert samples to f32, write to ring buffer, update levels, forward to writer.
+///
+/// Uses `try_lock` for visualization data (ring buffer, levels, waveform cache) so the
+/// real-time audio thread never blocks waiting for an IPC read. Missing one callback's
+/// worth of visualization data is invisible; losing recording data is not, so `writer_tx`
+/// keeps a regular lock.
 fn process_f32_samples(
     data: &[f32],
     num_channels: u16,
@@ -194,11 +324,11 @@ fn process_f32_samples(
     smoothed_levels: &Arc<Mutex<LevelData>>,
     is_recording: &Arc<AtomicBool>,
     writer_tx: &Arc<Mutex<Option<Sender<Vec<f32>>>>>,
-    recording_waveform_buffer: &Arc<Mutex<Vec<f32>>>,
+    recording_waveform_cache: &Arc<Mutex<RecordingWaveformCache>>,
 ) {
-    // Write to ring buffer for visualization
-    if let Ok(mut buf) = waveform_buffer.lock() {
-        if let Ok(mut pos) = waveform_write_pos.lock() {
+    // Write to ring buffer for visualization (skip if IPC is reading)
+    if let Ok(mut buf) = waveform_buffer.try_lock() {
+        if let Ok(mut pos) = waveform_write_pos.try_lock() {
             let buf_len = buf.len();
             for &sample in data {
                 buf[*pos % buf_len] = sample;
@@ -207,30 +337,28 @@ fn process_f32_samples(
         }
     }
 
-    // Update raw levels
+    // Compute levels (always — cheap arithmetic)
     let raw = calculate_stereo_levels(data, num_channels);
-    if let Ok(mut lvl) = levels.lock() {
+
+    // Update raw + smoothed levels (skip if IPC is reading — next callback catches up)
+    if let Ok(mut lvl) = levels.try_lock() {
         *lvl = raw.clone();
     }
-
-    // Update smoothed levels
-    if let Ok(mut smooth) = smoothed_levels.lock() {
+    if let Ok(mut smooth) = smoothed_levels.try_lock() {
         *smooth = smooth_levels(&raw, &smooth);
     }
 
-    // If recording, send to writer thread and accumulate for waveform
+    // If recording, send to writer thread (MUST succeed — real audio data)
+    // and accumulate for waveform visualization (best-effort)
     if is_recording.load(Ordering::Relaxed) {
         if let Ok(tx_guard) = writer_tx.lock() {
             if let Some(ref tx) = *tx_guard {
                 let _ = tx.send(data.to_vec());
             }
         }
-        // Append to recording waveform buffer (cap at ~10 min at 48kHz stereo = ~57.6M samples)
-        const MAX_RECORDING_SAMPLES: usize = 48000 * 2 * 600;
-        if let Ok(mut buf) = recording_waveform_buffer.lock() {
-            if buf.len() < MAX_RECORDING_SAMPLES {
-                buf.extend_from_slice(data);
-            }
+        // Waveform cache: try_lock so FFT in finalize_chunk never blocks audio thread
+        if let Ok(mut cache) = recording_waveform_cache.try_lock() {
+            cache.push_samples(data);
         }
     }
 }
@@ -265,7 +393,7 @@ pub fn select_device(device_id: &str, state: &RecorderState) -> Result<(), Strin
     let smoothed_levels = Arc::clone(&state.smoothed_levels);
     let is_recording = Arc::clone(&state.is_recording);
     let writer_tx = Arc::clone(&state.writer_tx);
-    let recording_waveform_buffer = Arc::clone(&state.recording_waveform_buffer);
+    let recording_waveform_cache = Arc::clone(&state.recording_waveform_cache);
 
     let err_fn = |err: cpal::StreamError| {
         eprintln!("Audio input error: {}", err);
@@ -280,12 +408,12 @@ pub fn select_device(device_id: &str, state: &RecorderState) -> Result<(), Strin
             let sl = smoothed_levels;
             let ir = is_recording;
             let wt = writer_tx;
-            let rwb = recording_waveform_buffer;
+            let rwc = recording_waveform_cache;
             device
                 .build_input_stream(
                     &stream_config,
                     move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                        process_f32_samples(data, num_channels, &wb, &wp, &lv, &sl, &ir, &wt, &rwb);
+                        process_f32_samples(data, num_channels, &wb, &wp, &lv, &sl, &ir, &wt, &rwc);
                     },
                     err_fn,
                     None,
@@ -299,14 +427,14 @@ pub fn select_device(device_id: &str, state: &RecorderState) -> Result<(), Strin
             let sl = smoothed_levels;
             let ir = is_recording;
             let wt = writer_tx;
-            let rwb = recording_waveform_buffer;
+            let rwc = recording_waveform_cache;
             device
                 .build_input_stream(
                     &stream_config,
                     move |data: &[i16], _: &cpal::InputCallbackInfo| {
                         let f32_data: Vec<f32> =
                             data.iter().map(|&s| s as f32 / 32768.0).collect();
-                        process_f32_samples(&f32_data, num_channels, &wb, &wp, &lv, &sl, &ir, &wt, &rwb);
+                        process_f32_samples(&f32_data, num_channels, &wb, &wp, &lv, &sl, &ir, &wt, &rwc);
                     },
                     err_fn,
                     None,
@@ -320,14 +448,14 @@ pub fn select_device(device_id: &str, state: &RecorderState) -> Result<(), Strin
             let sl = smoothed_levels;
             let ir = is_recording;
             let wt = writer_tx;
-            let rwb = recording_waveform_buffer;
+            let rwc = recording_waveform_cache;
             device
                 .build_input_stream(
                     &stream_config,
                     move |data: &[i32], _: &cpal::InputCallbackInfo| {
                         let f32_data: Vec<f32> =
                             data.iter().map(|&s| s as f32 / 2147483648.0).collect();
-                        process_f32_samples(&f32_data, num_channels, &wb, &wp, &lv, &sl, &ir, &wt, &rwb);
+                        process_f32_samples(&f32_data, num_channels, &wb, &wp, &lv, &sl, &ir, &wt, &rwc);
                     },
                     err_fn,
                     None,
@@ -482,18 +610,20 @@ pub fn start_recording(config: RecordingConfig, state: &RecorderState) -> Result
         });
     }
 
-    // Clear recording waveform buffer and set channel count
+    // Clear recording waveform cache
     {
-        let mut rwb = state.recording_waveform_buffer.lock().map_err(|e| e.to_string())?;
-        rwb.clear();
+        let mut cache = state.recording_waveform_cache.lock().map_err(|e| e.to_string())?;
+        cache.clear(sample_rate, channels);
     }
-    state.recording_waveform_channels.store(channels, Ordering::Relaxed);
 
+    state.writer_finalized.store(false, Ordering::Release);
     state.is_recording.store(true, Ordering::Relaxed);
     Ok(())
 }
 
-/// Stop recording and finalize the WAV file.
+/// Stop recording and return immediately.
+/// The writer thread is joined on a background thread so the IPC call never blocks.
+/// `writer_finalized` is set to true once the WAV is fully flushed.
 pub fn stop_recording(state: &RecorderState) -> Result<RecordingInfo, String> {
     if !state.is_recording.load(Ordering::Relaxed) {
         return Err("Not recording".to_string());
@@ -507,14 +637,7 @@ pub fn stop_recording(state: &RecorderState) -> Result<RecordingInfo, String> {
         *tx_guard = None;
     }
 
-    // Wait for writer thread to finish
-    {
-        let mut handle = state.writer_handle.lock().map_err(|e| e.to_string())?;
-        if let Some(h) = handle.take() {
-            h.join().map_err(|_| "Writer thread panicked".to_string())?;
-        }
-    }
-
+    // Capture recording info before cleanup (doesn't need writer to finish)
     let duration_secs = {
         let start = state.recording_start.lock().map_err(|e| e.to_string())?;
         start.map(|s| s.elapsed().as_secs_f64()).unwrap_or(0.0)
@@ -532,6 +655,21 @@ pub fn stop_recording(state: &RecorderState) -> Result<RecordingInfo, String> {
             .unwrap_or((48000, 2, 24))
     };
 
+    // Join writer thread on a background thread — don't block IPC
+    let writer_finalized = Arc::clone(&state.writer_finalized);
+    let handle = {
+        let mut h = state.writer_handle.lock().map_err(|e| e.to_string())?;
+        h.take()
+    };
+    if let Some(h) = handle {
+        std::thread::spawn(move || {
+            let _ = h.join();
+            writer_finalized.store(true, Ordering::Release);
+        });
+    } else {
+        state.writer_finalized.store(true, Ordering::Release);
+    }
+
     // Clean up
     {
         let mut start = state.recording_start.lock().map_err(|e| e.to_string())?;
@@ -545,6 +683,19 @@ pub fn stop_recording(state: &RecorderState) -> Result<RecordingInfo, String> {
         channels,
         bit_depth,
     })
+}
+
+/// Block until the writer thread has finished flushing + finalizing the WAV file.
+/// Returns Ok(()) if finalized within timeout, Err if timeout exceeded.
+pub fn wait_for_writer(state: &RecorderState, timeout_ms: u64) -> Result<(), String> {
+    let start = Instant::now();
+    while !state.writer_finalized.load(Ordering::Acquire) {
+        if start.elapsed().as_millis() as u64 > timeout_ms {
+            return Err("Timeout waiting for WAV file to be finalized".to_string());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    Ok(())
 }
 
 /// Get the current waveform data from the ring buffer.
@@ -594,29 +745,90 @@ pub fn get_spectrum_snapshot(state: &RecorderState, num_bins: usize) -> Vec<f32>
 }
 
 /// Get the growing recording waveform data (peaks + spectral centroids).
+/// Bins pre-computed chunk data — no FFT, no buffer clone, O(num_chunks) arithmetic.
 pub fn get_recording_waveform(state: &RecorderState, num_bars: usize) -> visualization::RecordingWaveformData {
-    let buf = match state.recording_waveform_buffer.lock() {
-        Ok(b) => b.clone(),
-        Err(_) => return visualization::RecordingWaveformData { peaks: vec![], centroids: vec![], duration: 0.0 },
-    };
+    match state.recording_waveform_cache.lock() {
+        Ok(cache) => cache.get_waveform(num_bars),
+        Err(_) => visualization::RecordingWaveformData { peaks: vec![], centroids: vec![], duration: 0.0 },
+    }
+}
 
-    if buf.is_empty() {
-        return visualization::RecordingWaveformData { peaks: vec![], centroids: vec![], duration: 0.0 };
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_waveform_cache_chunk_accumulation() {
+        let mut cache = RecordingWaveformCache::new();
+        cache.clear(48000, 1); // mono
+
+        // Push exactly one chunk worth of mono samples
+        let samples: Vec<f32> = (0..RECORDING_CHUNK_SIZE)
+            .map(|i| (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 48000.0).sin())
+            .collect();
+        cache.push_samples(&samples);
+        assert_eq!(cache.chunk_peaks.len(), 1);
+        assert!(cache.chunk_peaks[0] > 0.0);
+        assert!(cache.chunk_centroids[0] > 300.0); // near 440Hz
     }
 
-    let channels = state.recording_waveform_channels.load(Ordering::Relaxed) as usize;
-    let sample_rate = state.stream_sample_rate.load(Ordering::Relaxed);
+    #[test]
+    fn test_waveform_cache_stereo_mixing() {
+        let mut cache = RecordingWaveformCache::new();
+        cache.clear(48000, 2); // stereo
 
-    // Mix to mono
-    let mono: Vec<f32> = if channels > 1 {
-        buf.chunks(channels)
-            .map(|frame| frame.iter().sum::<f32>() / channels as f32)
-            .collect()
-    } else {
-        buf
-    };
+        // Push stereo interleaved data (L=0.5, R=0.5 → mono=0.5)
+        let stereo: Vec<f32> = vec![0.5; RECORDING_CHUNK_SIZE * 2]; // 2048 frames × 2 channels
+        cache.push_samples(&stereo);
+        assert_eq!(cache.chunk_peaks.len(), 1);
+        assert!((cache.chunk_peaks[0] - 0.5).abs() < 0.01);
+    }
 
-    let duration = mono.len() as f64 / sample_rate as f64;
+    #[test]
+    fn test_waveform_cache_binning() {
+        let mut cache = RecordingWaveformCache::new();
+        cache.clear(48000, 1);
 
-    visualization::compute_recording_waveform(&mono, sample_rate, num_bars, duration)
+        // Push 10 chunks of data
+        for _ in 0..10 {
+            let samples: Vec<f32> = (0..RECORDING_CHUNK_SIZE)
+                .map(|i| (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 48000.0).sin())
+                .collect();
+            cache.push_samples(&samples);
+        }
+        assert_eq!(cache.chunk_peaks.len(), 10);
+
+        // Bin into 5 bars
+        let waveform = cache.get_waveform(5);
+        assert_eq!(waveform.peaks.len(), 5);
+        assert_eq!(waveform.centroids.len(), 5);
+        assert!(waveform.duration > 0.0);
+
+        // Bin into more bars than chunks — returns chunk count
+        let waveform = cache.get_waveform(20);
+        assert_eq!(waveform.peaks.len(), 10);
+    }
+
+    #[test]
+    fn test_waveform_cache_clear() {
+        let mut cache = RecordingWaveformCache::new();
+        cache.clear(48000, 1);
+        let samples = vec![0.5_f32; RECORDING_CHUNK_SIZE * 3];
+        cache.push_samples(&samples);
+        assert!(cache.chunk_peaks.len() > 0);
+
+        cache.clear(44100, 2);
+        assert_eq!(cache.chunk_peaks.len(), 0);
+        assert_eq!(cache.chunk_centroids.len(), 0);
+        assert_eq!(cache.sample_rate, 44100);
+        assert_eq!(cache.num_channels, 2);
+    }
+
+    #[test]
+    fn test_waveform_cache_empty() {
+        let cache = RecordingWaveformCache::new();
+        let waveform = cache.get_waveform(800);
+        assert!(waveform.peaks.is_empty());
+        assert_eq!(waveform.duration, 0.0);
+    }
 }

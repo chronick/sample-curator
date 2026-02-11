@@ -93,26 +93,15 @@ describe("useWaveformRenderer", () => {
     expect(ctx.clearRect).toHaveBeenCalledWith(0, 0, 800, 400);
   });
 
-  it("draws center line", () => {
+  it("skips all drawing when data is empty (avoids clobbering recording waveform)", () => {
     const { canvas, ctx } = createMockCanvas();
     const canvasRef = { current: canvas };
 
     renderHook(() => useWaveformRenderer(canvasRef, []));
 
-    expect(ctx.beginPath).toHaveBeenCalled();
-    expect(ctx.moveTo).toHaveBeenCalledWith(0, 200);
-    expect(ctx.lineTo).toHaveBeenCalledWith(800, 200);
-    expect(ctx.stroke).toHaveBeenCalled();
-  });
-
-  it("does not draw waveform line when data is empty", () => {
-    const { canvas, ctx } = createMockCanvas();
-    const canvasRef = { current: canvas };
-
-    renderHook(() => useWaveformRenderer(canvasRef, []));
-
-    // Only the center line drawing: one beginPath call
-    expect(ctx.beginPath).toHaveBeenCalledTimes(1);
+    // With empty data, the renderer should not touch the canvas at all
+    expect(ctx.clearRect).not.toHaveBeenCalled();
+    expect(ctx.beginPath).not.toHaveBeenCalled();
   });
 
   it("draws waveform line when data provided", () => {

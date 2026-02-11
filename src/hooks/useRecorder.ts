@@ -8,6 +8,8 @@ export function useRecorder() {
   const animFrameRef = useRef<number>(0);
   const pollingRef = useRef(false);
   const initializedRef = useRef(false);
+  const waveformPollRef = useRef<number>(0);
+  const waveformPollActiveRef = useRef(false);
 
   // Load devices and config on mount (only once across all hook instances)
   useEffect(() => {
@@ -27,6 +29,11 @@ export function useRecorder() {
     return () => {
       pollingRef.current = false;
       cancelAnimationFrame(animFrameRef.current);
+      waveformPollActiveRef.current = false;
+      if (waveformPollRef.current) {
+        window.clearTimeout(waveformPollRef.current);
+        waveformPollRef.current = 0;
+      }
     };
   }, []);
 
@@ -41,7 +48,9 @@ export function useRecorder() {
     }
   }, []);
 
-  // Polling loop for visualization data
+  // Polling loop for visualization data.
+  // During recording: throttled to ~20fps via setTimeout (only levels + status needed).
+  // When idle: full 60fps via rAF (levels + waveform + spectrum).
   const startPolling = useCallback(() => {
     if (pollingRef.current) return;
     pollingRef.current = true;
@@ -50,17 +59,21 @@ export function useRecorder() {
       if (!pollingRef.current) return;
 
       try {
-        const [levels, waveform, spectrum, status] = await Promise.all([
+        const isRec = useRecorderStore.getState().isRecording;
+
+        // During recording, skip live waveform (recording waveform replaces it)
+        // but keep spectrum/FFT active so the user can see frequency content.
+        const [levels, status, waveform, spectrum] = await Promise.all([
           invoke<{ channels: Array<{ rms_db: number; peak_db: number }> }>("recorder_get_audio_levels"),
-          invoke<number[]>("recorder_get_waveform_data", { numSamples: 1024 }),
-          invoke<number[]>("recorder_get_spectrum_data", { numBins: 128 }),
           invoke<{ is_recording: boolean; is_monitoring: boolean; elapsed_secs: number }>(
             "recorder_get_recording_status"
           ),
+          isRec ? Promise.resolve(null) : invoke<number[]>("recorder_get_waveform_data", { numSamples: 1024 }),
+          invoke<number[]>("recorder_get_spectrum_data", { numBins: 128 }),
         ]);
 
         store.setLevels(levels);
-        store.setWaveformData(waveform);
+        if (waveform) store.setWaveformData(waveform);
         store.setSpectrumData(spectrum);
 
         // Only update boolean states when they actually change to avoid re-renders
@@ -73,22 +86,12 @@ export function useRecorder() {
         }
         if (status.is_recording) {
           store.setElapsedTime(status.elapsed_secs);
-
-          // Poll recording waveform when recording
-          try {
-            const recWaveform = await invoke<RecordingWaveformData>(
-              "recorder_get_recording_waveform",
-              { numBars: 800 }
-            );
-            store.setRecordingWaveform(recWaveform);
-          } catch {
-            // Ignore — not critical
-          }
         }
       } catch (e) {
         console.error("Recorder polling error:", e);
       }
 
+      if (!pollingRef.current) return;
       animFrameRef.current = requestAnimationFrame(poll);
     };
 
@@ -98,6 +101,45 @@ export function useRecorder() {
   const stopPolling = useCallback(() => {
     pollingRef.current = false;
     cancelAnimationFrame(animFrameRef.current);
+    waveformPollActiveRef.current = false;
+    if (waveformPollRef.current) {
+      window.clearTimeout(waveformPollRef.current);
+      waveformPollRef.current = 0;
+    }
+  }, []);
+
+  // Non-overlapping recording waveform poll (~10Hz).
+  // Uses setTimeout so the next poll only fires after the previous IPC completes.
+  const startWaveformPoll = useCallback(() => {
+    if (waveformPollActiveRef.current) return;
+    waveformPollActiveRef.current = true;
+
+    const poll = async () => {
+      if (!waveformPollActiveRef.current) return;
+      try {
+        const recWaveform = await invoke<RecordingWaveformData>(
+          "recorder_get_recording_waveform",
+          { numBars: 800 }
+        );
+        if (waveformPollActiveRef.current) {
+          useRecorderStore.getState().setRecordingWaveform(recWaveform);
+        }
+      } catch {
+        // Ignore — not critical
+      }
+      if (waveformPollActiveRef.current) {
+        waveformPollRef.current = window.setTimeout(poll, 100);
+      }
+    };
+    poll();
+  }, []);
+
+  const stopWaveformPoll = useCallback(() => {
+    waveformPollActiveRef.current = false;
+    if (waveformPollRef.current) {
+      window.clearTimeout(waveformPollRef.current);
+      waveformPollRef.current = 0;
+    }
   }, []);
 
   const selectDevice = useCallback(
@@ -129,40 +171,43 @@ export function useRecorder() {
       store.setRecordingState(true);
       store.setElapsedTime(0);
       store.setRecordingWaveform(null);
+      startWaveformPoll();
     } catch (e) {
       console.error("Failed to start recording:", e);
     }
-  }, []);
+  }, [startWaveformPoll]);
 
   const stopRecording = useCallback(async () => {
     try {
+      stopWaveformPoll();
       const info = await invoke<RecordingInfo>("recorder_stop_recording");
       store.setRecordingState(false);
       store.setElapsedTime(0);
       store.addRecording(info);
 
-      // Auto-save to library
-      try {
-        const result = await invoke<SaveResult>("recorder_save_to_library", {
-          path: info.path,
-          tags: ["recorded"],
+      // Fire-and-forget: save + analyze in background — don't block the UI
+      invoke<SaveResult>("recorder_save_to_library", {
+        path: info.path,
+        tags: ["recorded"],
+      })
+        .then((result) => {
+          const s = useRecorderStore.getState();
+          s.setLastSavedSample(result);
+          s.updateRecordingSampleId(info.path, result.sample_id);
+          setTimeout(() => {
+            useRecorderStore.getState().setLastSavedSample(null);
+          }, 3000);
+        })
+        .catch((e) => {
+          console.warn("Recording saved locally but failed to import to library:", e);
         });
-        store.setLastSavedSample(result);
-        store.updateRecordingSampleId(info.path, result.sample_id);
-        // Clear notification after 3 seconds
-        setTimeout(() => {
-          useRecorderStore.getState().setLastSavedSample(null);
-        }, 3000);
-      } catch (e) {
-        console.warn("Recording saved locally but failed to import to library:", e);
-      }
 
       return info;
     } catch (e) {
       console.error("Failed to stop recording:", e);
       return null;
     }
-  }, []);
+  }, [stopWaveformPoll]);
 
   const openRecordingsDir = useCallback(async () => {
     try {
