@@ -34,8 +34,18 @@ export function HeaderBar({
         {/* Top-level view tabs */}
         <div className="flex items-center border border-surface-border rounded overflow-hidden ml-2">
           <button
-            onClick={() => onSetActiveView("browse")}
+            onClick={() => onSetActiveView("record")}
             className={`px-3 py-1 text-xs font-medium transition-colors ${
+              activeView === "record"
+                ? "bg-accent/20 text-accent"
+                : "hover:bg-surface-hover text-gray-400"
+            }`}
+          >
+            Record
+          </button>
+          <button
+            onClick={() => onSetActiveView("browse")}
+            className={`px-3 py-1 text-xs font-medium transition-colors border-l border-surface-border ${
               activeView === "browse"
                 ? "bg-accent/20 text-accent"
                 : "hover:bg-surface-hover text-gray-400"
@@ -52,16 +62,6 @@ export function HeaderBar({
             }`}
           >
             Jobs
-          </button>
-          <button
-            onClick={() => onSetActiveView("record")}
-            className={`px-3 py-1 text-xs font-medium transition-colors border-l border-surface-border ${
-              activeView === "record"
-                ? "bg-accent/20 text-accent"
-                : "hover:bg-surface-hover text-gray-400"
-            }`}
-          >
-            Record
           </button>
         </div>
       </div>

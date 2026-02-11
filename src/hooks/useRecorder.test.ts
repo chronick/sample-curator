@@ -18,7 +18,9 @@ vi.mock("../store/recorderStore", () => {
     setSpectrumData: vi.fn(),
     setConfig: vi.fn(),
     addRecording: vi.fn(),
+    updateRecordingSampleId: vi.fn(),
     setLastSavedSample: vi.fn(),
+    setRecordingWaveform: vi.fn(),
     config: { sample_rate: 48000, bit_depth: 24, channels: 2, output_dir: "", default_device: null },
     isRecording: false,
     isMonitoring: false,
@@ -231,6 +233,8 @@ describe("useRecorder", () => {
     const mockSaveResult = {
       sample_id: 42,
       path: "/library/samples/session-001.wav",
+      analyzed: true,
+      pack_name: "Recordings",
     };
 
     mockInvoke.mockResolvedValueOnce(mockRecordingInfo); // recorder_stop_recording
@@ -241,6 +245,7 @@ describe("useRecorder", () => {
     (store.setElapsedTime as ReturnType<typeof vi.fn>).mockClear();
     (store.addRecording as ReturnType<typeof vi.fn>).mockClear();
     (store.setLastSavedSample as ReturnType<typeof vi.fn>).mockClear();
+    (store.updateRecordingSampleId as ReturnType<typeof vi.fn>).mockClear();
 
     let info: any;
     await act(async () => {
@@ -256,6 +261,7 @@ describe("useRecorder", () => {
     expect(store.setElapsedTime).toHaveBeenCalledWith(0);
     expect(store.addRecording).toHaveBeenCalledWith(mockRecordingInfo);
     expect(store.setLastSavedSample).toHaveBeenCalledWith(mockSaveResult);
+    expect(store.updateRecordingSampleId).toHaveBeenCalledWith("/recordings/session-001.wav", 42);
     expect(info).toEqual(mockRecordingInfo);
   });
 
@@ -369,7 +375,7 @@ describe("useRecorder", () => {
       channels: 2,
       bit_depth: 24,
     };
-    const mockSaveResult = { sample_id: 99, path: "/library/samples/session-003.wav" };
+    const mockSaveResult = { sample_id: 99, path: "/library/samples/session-003.wav", analyzed: true, pack_name: "Recordings" };
 
     mockInvoke.mockResolvedValueOnce(mockRecordingInfo);
     mockInvoke.mockResolvedValueOnce(mockSaveResult);

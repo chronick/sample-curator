@@ -49,4 +49,16 @@ export interface RecorderConfig {
 export interface SaveResult {
   sample_id: number;
   path: string;
+  analyzed: boolean;
+  pack_name: string | null;
+}
+
+export interface RecordingEntry extends RecordingInfo {
+  sample_id?: number;
+}
+
+export interface RecordingWaveformData {
+  peaks: number[];
+  centroids: number[];
+  duration: number;
 }

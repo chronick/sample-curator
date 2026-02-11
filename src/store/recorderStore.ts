@@ -3,7 +3,9 @@ import type {
   AudioDevice,
   LevelData,
   RecordingInfo,
+  RecordingEntry,
   RecorderConfig,
+  RecordingWaveformData,
   SaveResult,
 } from "../types/recorder";
 
@@ -36,8 +38,17 @@ interface RecorderStore {
   setSpectrumData: (data: number[]) => void;
 
   // Recent recordings
-  recentRecordings: RecordingInfo[];
+  recentRecordings: RecordingEntry[];
   addRecording: (recording: RecordingInfo) => void;
+  updateRecordingSampleId: (path: string, sampleId: number) => void;
+
+  // Expanded recording
+  expandedRecordingIndex: number | null;
+  setExpandedRecordingIndex: (index: number | null) => void;
+
+  // Recording waveform
+  recordingWaveform: RecordingWaveformData | null;
+  setRecordingWaveform: (data: RecordingWaveformData | null) => void;
 
   // Auto-import feedback
   lastSavedSample: SaveResult | null;
@@ -89,6 +100,20 @@ export const useRecorderStore = create<RecorderStore>((set) => ({
     set((state) => ({
       recentRecordings: [recording, ...state.recentRecordings].slice(0, 20),
     })),
+  updateRecordingSampleId: (path, sampleId) =>
+    set((state) => ({
+      recentRecordings: state.recentRecordings.map((rec) =>
+        rec.path === path ? { ...rec, sample_id: sampleId } : rec
+      ),
+    })),
+
+  // Expanded recording
+  expandedRecordingIndex: null,
+  setExpandedRecordingIndex: (expandedRecordingIndex) => set({ expandedRecordingIndex }),
+
+  // Recording waveform
+  recordingWaveform: null,
+  setRecordingWaveform: (recordingWaveform) => set({ recordingWaveform }),
 
   // Auto-import
   lastSavedSample: null,

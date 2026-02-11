@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useRecorderStore } from './recorderStore';
-import type { AudioDevice, RecordingInfo, SaveResult } from '../types/recorder';
+import type { AudioDevice, RecordingInfo, RecordingEntry, SaveResult } from '../types/recorder';
 
 // Helper to create a mock audio device
 function makeDevice(overrides: Partial<AudioDevice> = {}): AudioDevice {
@@ -46,6 +46,8 @@ describe('useRecorderStore', () => {
       waveformData: [],
       spectrumData: [],
       recentRecordings: [],
+      expandedRecordingIndex: null,
+      recordingWaveform: null,
       lastSavedSample: null,
       settingsOpen: false,
     });
@@ -67,6 +69,8 @@ describe('useRecorderStore', () => {
     expect(state.waveformData).toEqual([]);
     expect(state.spectrumData).toEqual([]);
     expect(state.recentRecordings).toEqual([]);
+    expect(state.expandedRecordingIndex).toBeNull();
+    expect(state.recordingWaveform).toBeNull();
     expect(state.lastSavedSample).toBeNull();
     expect(state.settingsOpen).toBe(false);
   });
@@ -224,18 +228,52 @@ describe('useRecorderStore', () => {
     expect(state.recentRecordings[19].path).toBe('/recordings/session-002.wav');
   });
 
+  it('setExpandedRecordingIndex toggles expanded recording', () => {
+    useRecorderStore.getState().setExpandedRecordingIndex(2);
+    expect(useRecorderStore.getState().expandedRecordingIndex).toBe(2);
+
+    useRecorderStore.getState().setExpandedRecordingIndex(null);
+    expect(useRecorderStore.getState().expandedRecordingIndex).toBeNull();
+  });
+
+  it('setRecordingWaveform sets and clears waveform data', () => {
+    const data = { peaks: [0.5, 0.8], centroids: [440, 1200], duration: 1.5 };
+    useRecorderStore.getState().setRecordingWaveform(data);
+    expect(useRecorderStore.getState().recordingWaveform).toEqual(data);
+
+    useRecorderStore.getState().setRecordingWaveform(null);
+    expect(useRecorderStore.getState().recordingWaveform).toBeNull();
+  });
+
+  it('updateRecordingSampleId sets sample_id on matching recording', () => {
+    const rec1 = makeRecording({ path: '/recordings/first.wav' });
+    const rec2 = makeRecording({ path: '/recordings/second.wav' });
+    useRecorderStore.getState().addRecording(rec1);
+    useRecorderStore.getState().addRecording(rec2);
+
+    useRecorderStore.getState().updateRecordingSampleId('/recordings/first.wav', 42);
+
+    const recordings = useRecorderStore.getState().recentRecordings;
+    const first = recordings.find((r) => r.path === '/recordings/first.wav');
+    const second = recordings.find((r) => r.path === '/recordings/second.wav');
+    expect(first?.sample_id).toBe(42);
+    expect(second?.sample_id).toBeUndefined();
+  });
+
   it('setLastSavedSample sets a save result', () => {
-    const result: SaveResult = { sample_id: 42, path: '/library/kick-001.wav' };
+    const result: SaveResult = { sample_id: 42, path: '/library/kick-001.wav', analyzed: true, pack_name: 'Recordings' };
     useRecorderStore.getState().setLastSavedSample(result);
 
     const state = useRecorderStore.getState();
     expect(state.lastSavedSample).not.toBeNull();
     expect(state.lastSavedSample!.sample_id).toBe(42);
     expect(state.lastSavedSample!.path).toBe('/library/kick-001.wav');
+    expect(state.lastSavedSample!.analyzed).toBe(true);
+    expect(state.lastSavedSample!.pack_name).toBe('Recordings');
   });
 
   it('setLastSavedSample clears with null', () => {
-    const result: SaveResult = { sample_id: 42, path: '/library/kick-001.wav' };
+    const result: SaveResult = { sample_id: 42, path: '/library/kick-001.wav', analyzed: true, pack_name: 'Recordings' };
     useRecorderStore.getState().setLastSavedSample(result);
     useRecorderStore.getState().setLastSavedSample(null);
     expect(useRecorderStore.getState().lastSavedSample).toBeNull();

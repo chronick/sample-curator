@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useRecorderStore } from "../store/recorderStore";
-import type { AudioDevice, RecordingInfo, RecorderConfig, SaveResult } from "../types/recorder";
+import type { AudioDevice, RecordingInfo, RecorderConfig, RecordingWaveformData, SaveResult } from "../types/recorder";
 
 export function useRecorder() {
   const store = useRecorderStore();
@@ -73,6 +73,17 @@ export function useRecorder() {
         }
         if (status.is_recording) {
           store.setElapsedTime(status.elapsed_secs);
+
+          // Poll recording waveform when recording
+          try {
+            const recWaveform = await invoke<RecordingWaveformData>(
+              "recorder_get_recording_waveform",
+              { numBars: 800 }
+            );
+            store.setRecordingWaveform(recWaveform);
+          } catch {
+            // Ignore — not critical
+          }
         }
       } catch (e) {
         console.error("Recorder polling error:", e);
@@ -117,6 +128,7 @@ export function useRecorder() {
       });
       store.setRecordingState(true);
       store.setElapsedTime(0);
+      store.setRecordingWaveform(null);
     } catch (e) {
       console.error("Failed to start recording:", e);
     }
@@ -136,6 +148,7 @@ export function useRecorder() {
           tags: ["recorded"],
         });
         store.setLastSavedSample(result);
+        store.updateRecordingSampleId(info.path, result.sample_id);
         // Clear notification after 3 seconds
         setTimeout(() => {
           useRecorderStore.getState().setLastSavedSample(null);

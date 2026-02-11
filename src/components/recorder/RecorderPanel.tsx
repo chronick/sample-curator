@@ -8,12 +8,22 @@ import { RecordingsList } from "./RecordingsList";
 import { RecorderSettingsDialog } from "./RecorderSettingsDialog";
 import { useRecorderStore } from "../../store/recorderStore";
 import { useRecorder } from "../../hooks/useRecorder";
+import { useStore } from "../../store";
 
 export function RecorderPanel() {
   const setSettingsOpen = useRecorderStore((s) => s.setSettingsOpen);
   const config = useRecorderStore((s) => s.config);
   const lastSaved = useRecorderStore((s) => s.lastSavedSample);
   const { openRecordingsDir } = useRecorder();
+  const setActiveView = useStore((s) => s.setActiveView);
+  const setFilters = useStore((s) => s.setFilters);
+  const setSort = useStore((s) => s.setSort);
+
+  const viewInBrowser = () => {
+    setFilters({ tags: ["recorded"], offset: 0 });
+    setSort("created_at", "desc");
+    setActiveView("browse");
+  };
 
   const formatRate = (rate: number) =>
     rate === 44100 ? "44.1kHz" : `${rate / 1000}kHz`;
@@ -42,6 +52,10 @@ export function RecorderPanel() {
       {lastSaved && (
         <div className="px-4 py-1.5 bg-green-900/20 border-b border-green-700/30 text-xs text-green-400 flex items-center gap-2">
           <span>Saved to library</span>
+          {lastSaved.analyzed && <span className="text-green-600">Analyzed</span>}
+          {lastSaved.pack_name && (
+            <span className="text-green-600">{lastSaved.pack_name}</span>
+          )}
           <span className="text-green-600">#{lastSaved.sample_id}</span>
         </div>
       )}
@@ -60,13 +74,22 @@ export function RecorderPanel() {
       <div className="px-4 py-2 border-t border-surface-border">
         <div className="flex items-center justify-between mb-1">
           <div className="text-xs text-gray-500">Recent</div>
-          <button
-            onClick={openRecordingsDir}
-            className="text-xs text-gray-400 hover:text-white flex items-center gap-1"
-            title="Open recordings folder"
-          >
-            Open folder
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={viewInBrowser}
+              className="text-xs text-gray-400 hover:text-white flex items-center gap-1"
+              title="View recordings in sample browser"
+            >
+              View in Browser
+            </button>
+            <button
+              onClick={openRecordingsDir}
+              className="text-xs text-gray-400 hover:text-white flex items-center gap-1"
+              title="Open recordings folder"
+            >
+              Open folder
+            </button>
+          </div>
         </div>
         <RecordingsList />
       </div>

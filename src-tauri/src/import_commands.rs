@@ -3,12 +3,7 @@
 //! Handles scanning directories and importing audio files into the database
 //! with optional analysis. Runs imports in a background thread.
 
-use sample_analysis_core::analyzers::{
-    bpm::analyze_bpm_file,
-    key::analyze_key_file,
-    quality::analyze_quality_file,
-    spectral::analyze_spectral_file,
-};
+use crate::analysis_pipeline::{analyze_sample, AnalysisPipeline};
 use sample_analysis_core::audio::get_audio_info;
 use sample_library_core::db::Database;
 use sample_library_core::watcher::scan_directory;
@@ -315,73 +310,19 @@ pub(crate) fn detect_pack_name_testable(file_path: &Path, import_root: &Path) ->
 }
 
 /// Run analysis on a single sample and update the database.
+/// Delegates to the shared analysis pipeline dispatcher.
 fn run_analysis(
     db: &Database,
     sample_id: i64,
     file_path: &str,
     progress: &Arc<Mutex<ImportProgress>>,
 ) {
-    let mut bpm: Option<f64> = None;
-    let mut key: Option<String> = None;
-    let mut rms_db: Option<f64> = None;
-    let mut peak_db: Option<f64> = None;
-    let mut crest_factor: Option<f64> = None;
-    let mut dynamic_range: Option<f64> = None;
-    let mut clipping_detected: Option<bool> = None;
-    let mut spectral_centroid: Option<f64> = None;
-    let mut spectral_flatness: Option<f64> = None;
-    let mut quality_score: Option<f64> = None;
-
-    // BPM
-    if let Ok(result) = analyze_bpm_file(file_path, None) {
-        bpm = Some(result.bpm);
-    }
-
-    // Key
-    if let Ok(result) = analyze_key_file(file_path, None) {
-        key = Some(result.key);
-    }
-
-    // Quality
-    if let Ok(result) = analyze_quality_file(file_path, None) {
-        rms_db = Some(result.rms_db);
-        peak_db = Some(result.peak_db);
-        crest_factor = Some(result.crest_factor);
-        dynamic_range = Some(result.dynamic_range);
-        clipping_detected = Some(result.clipping_detected);
-
-        // Simple quality score from quality metrics
-        let clip_penalty = if result.clipping_detected { 20.0 } else { 0.0 };
-        let dr_score = (result.dynamic_range / 20.0 * 100.0).min(100.0);
-        quality_score = Some((dr_score - clip_penalty).max(0.0));
-    }
-
-    // Spectral
-    if let Ok(result) = analyze_spectral_file(file_path, None) {
-        spectral_centroid = Some(result.spectral_centroid);
-        spectral_flatness = Some(result.spectral_flatness);
-    }
-
-    // Update database
-    if let Err(e) = db.update_sample_analysis(
-        sample_id,
-        bpm,
-        key.as_deref(),
-        rms_db,
-        peak_db,
-        crest_factor,
-        dynamic_range,
-        clipping_detected,
-        spectral_centroid,
-        spectral_flatness,
-        None, // loop_quality
-        None, // is_loopable
-        quality_score,
-        None, // applicability_score
-    ) {
+    let result = analyze_sample(db, sample_id, file_path, AnalysisPipeline::Standard);
+    if !result.errors.is_empty() {
         let mut p = progress.lock().unwrap();
-        p.errors
-            .push((file_path.to_string(), format!("Analysis update failed: {}", e)));
+        for err in result.errors {
+            p.errors.push((file_path.to_string(), err));
+        }
     }
 }
 

@@ -1,4 +1,4 @@
-use super::metering::{calculate_stereo_levels, LevelData};
+use super::metering::{calculate_stereo_levels, ChannelLevel, LevelData};
 use super::visualization;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::SampleFormat;
@@ -60,6 +60,7 @@ pub struct RecorderState {
     waveform_buffer: Arc<Mutex<Vec<f32>>>,
     waveform_write_pos: Arc<Mutex<usize>>,
     pub levels: Arc<Mutex<LevelData>>,
+    pub smoothed_levels: Arc<Mutex<LevelData>>,
 
     // Actual device stream properties (set when device is selected)
     pub stream_channels: Arc<AtomicU16>,
@@ -72,6 +73,10 @@ pub struct RecorderState {
     pub recording_start: Mutex<Option<Instant>>,
     pub current_file: Mutex<Option<String>>,
     recording_config: Mutex<Option<RecordingConfig>>,
+
+    // Recording waveform accumulation buffer (grows during recording)
+    pub recording_waveform_buffer: Arc<Mutex<Vec<f32>>>,
+    pub recording_waveform_channels: Arc<AtomicU16>,
 }
 
 impl RecorderState {
@@ -82,6 +87,7 @@ impl RecorderState {
             waveform_buffer: Arc::new(Mutex::new(vec![0.0; RING_BUFFER_SIZE])),
             waveform_write_pos: Arc::new(Mutex::new(0)),
             levels: Arc::new(Mutex::new(LevelData::default())),
+            smoothed_levels: Arc::new(Mutex::new(LevelData::default())),
 
             stream_channels: Arc::new(AtomicU16::new(2)),
             stream_sample_rate: Arc::new(AtomicU32::new(48000)),
@@ -92,6 +98,9 @@ impl RecorderState {
             recording_start: Mutex::new(None),
             current_file: Mutex::new(None),
             recording_config: Mutex::new(None),
+
+            recording_waveform_buffer: Arc::new(Mutex::new(Vec::new())),
+            recording_waveform_channels: Arc::new(AtomicU16::new(2)),
         }
     }
 }
@@ -148,6 +157,33 @@ fn find_device_by_id(device_id: &str) -> Result<cpal::Device, String> {
     Err(format!("Device not found: {}", device_id))
 }
 
+/// Apply exponential smoothing to level data.
+/// Fast attack (transients register quickly), slow decay (ambient noise settles).
+fn smooth_levels(raw: &LevelData, prev: &LevelData) -> LevelData {
+    let mut channels = Vec::with_capacity(raw.channels.len());
+    for (i, raw_ch) in raw.channels.iter().enumerate() {
+        let prev_ch = prev.channels.get(i);
+        let (prev_rms, prev_peak) = match prev_ch {
+            Some(p) => (p.rms_db, p.peak_db),
+            None => (-96.0, -96.0),
+        };
+
+        // RMS: attack=0.4, decay=0.15
+        let rms_alpha = if raw_ch.rms_db > prev_rms { 0.4 } else { 0.15 };
+        let smoothed_rms = rms_alpha * raw_ch.rms_db + (1.0 - rms_alpha) * prev_rms;
+
+        // Peak: attack=0.5, decay=0.1
+        let peak_alpha = if raw_ch.peak_db > prev_peak { 0.5 } else { 0.1 };
+        let smoothed_peak = peak_alpha * raw_ch.peak_db + (1.0 - peak_alpha) * prev_peak;
+
+        channels.push(ChannelLevel {
+            rms_db: smoothed_rms,
+            peak_db: smoothed_peak,
+        });
+    }
+    LevelData { channels }
+}
+
 /// Common callback logic: convert samples to f32, write to ring buffer, update levels, forward to writer.
 fn process_f32_samples(
     data: &[f32],
@@ -155,8 +191,10 @@ fn process_f32_samples(
     waveform_buffer: &Arc<Mutex<Vec<f32>>>,
     waveform_write_pos: &Arc<Mutex<usize>>,
     levels: &Arc<Mutex<LevelData>>,
+    smoothed_levels: &Arc<Mutex<LevelData>>,
     is_recording: &Arc<AtomicBool>,
     writer_tx: &Arc<Mutex<Option<Sender<Vec<f32>>>>>,
+    recording_waveform_buffer: &Arc<Mutex<Vec<f32>>>,
 ) {
     // Write to ring buffer for visualization
     if let Ok(mut buf) = waveform_buffer.lock() {
@@ -169,16 +207,29 @@ fn process_f32_samples(
         }
     }
 
-    // Update levels
+    // Update raw levels
+    let raw = calculate_stereo_levels(data, num_channels);
     if let Ok(mut lvl) = levels.lock() {
-        *lvl = calculate_stereo_levels(data, num_channels);
+        *lvl = raw.clone();
     }
 
-    // If recording, send to writer thread
+    // Update smoothed levels
+    if let Ok(mut smooth) = smoothed_levels.lock() {
+        *smooth = smooth_levels(&raw, &smooth);
+    }
+
+    // If recording, send to writer thread and accumulate for waveform
     if is_recording.load(Ordering::Relaxed) {
         if let Ok(tx_guard) = writer_tx.lock() {
             if let Some(ref tx) = *tx_guard {
                 let _ = tx.send(data.to_vec());
+            }
+        }
+        // Append to recording waveform buffer (cap at ~10 min at 48kHz stereo = ~57.6M samples)
+        const MAX_RECORDING_SAMPLES: usize = 48000 * 2 * 600;
+        if let Ok(mut buf) = recording_waveform_buffer.lock() {
+            if buf.len() < MAX_RECORDING_SAMPLES {
+                buf.extend_from_slice(data);
             }
         }
     }
@@ -211,8 +262,10 @@ pub fn select_device(device_id: &str, state: &RecorderState) -> Result<(), Strin
     let waveform_buffer = Arc::clone(&state.waveform_buffer);
     let waveform_write_pos = Arc::clone(&state.waveform_write_pos);
     let levels = Arc::clone(&state.levels);
+    let smoothed_levels = Arc::clone(&state.smoothed_levels);
     let is_recording = Arc::clone(&state.is_recording);
     let writer_tx = Arc::clone(&state.writer_tx);
+    let recording_waveform_buffer = Arc::clone(&state.recording_waveform_buffer);
 
     let err_fn = |err: cpal::StreamError| {
         eprintln!("Audio input error: {}", err);
@@ -224,13 +277,15 @@ pub fn select_device(device_id: &str, state: &RecorderState) -> Result<(), Strin
             let wb = waveform_buffer;
             let wp = waveform_write_pos;
             let lv = levels;
+            let sl = smoothed_levels;
             let ir = is_recording;
             let wt = writer_tx;
+            let rwb = recording_waveform_buffer;
             device
                 .build_input_stream(
                     &stream_config,
                     move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                        process_f32_samples(data, num_channels, &wb, &wp, &lv, &ir, &wt);
+                        process_f32_samples(data, num_channels, &wb, &wp, &lv, &sl, &ir, &wt, &rwb);
                     },
                     err_fn,
                     None,
@@ -241,15 +296,17 @@ pub fn select_device(device_id: &str, state: &RecorderState) -> Result<(), Strin
             let wb = waveform_buffer;
             let wp = waveform_write_pos;
             let lv = levels;
+            let sl = smoothed_levels;
             let ir = is_recording;
             let wt = writer_tx;
+            let rwb = recording_waveform_buffer;
             device
                 .build_input_stream(
                     &stream_config,
                     move |data: &[i16], _: &cpal::InputCallbackInfo| {
                         let f32_data: Vec<f32> =
                             data.iter().map(|&s| s as f32 / 32768.0).collect();
-                        process_f32_samples(&f32_data, num_channels, &wb, &wp, &lv, &ir, &wt);
+                        process_f32_samples(&f32_data, num_channels, &wb, &wp, &lv, &sl, &ir, &wt, &rwb);
                     },
                     err_fn,
                     None,
@@ -260,15 +317,17 @@ pub fn select_device(device_id: &str, state: &RecorderState) -> Result<(), Strin
             let wb = waveform_buffer;
             let wp = waveform_write_pos;
             let lv = levels;
+            let sl = smoothed_levels;
             let ir = is_recording;
             let wt = writer_tx;
+            let rwb = recording_waveform_buffer;
             device
                 .build_input_stream(
                     &stream_config,
                     move |data: &[i32], _: &cpal::InputCallbackInfo| {
                         let f32_data: Vec<f32> =
                             data.iter().map(|&s| s as f32 / 2147483648.0).collect();
-                        process_f32_samples(&f32_data, num_channels, &wb, &wp, &lv, &ir, &wt);
+                        process_f32_samples(&f32_data, num_channels, &wb, &wp, &lv, &sl, &ir, &wt, &rwb);
                     },
                     err_fn,
                     None,
@@ -423,6 +482,13 @@ pub fn start_recording(config: RecordingConfig, state: &RecorderState) -> Result
         });
     }
 
+    // Clear recording waveform buffer and set channel count
+    {
+        let mut rwb = state.recording_waveform_buffer.lock().map_err(|e| e.to_string())?;
+        rwb.clear();
+    }
+    state.recording_waveform_channels.store(channels, Ordering::Relaxed);
+
     state.is_recording.store(true, Ordering::Relaxed);
     Ok(())
 }
@@ -525,4 +591,32 @@ pub fn get_spectrum_snapshot(state: &RecorderState, num_bins: usize) -> Vec<f32>
     }
 
     visualization::calculate_spectrum(&samples, num_bins)
+}
+
+/// Get the growing recording waveform data (peaks + spectral centroids).
+pub fn get_recording_waveform(state: &RecorderState, num_bars: usize) -> visualization::RecordingWaveformData {
+    let buf = match state.recording_waveform_buffer.lock() {
+        Ok(b) => b.clone(),
+        Err(_) => return visualization::RecordingWaveformData { peaks: vec![], centroids: vec![], duration: 0.0 },
+    };
+
+    if buf.is_empty() {
+        return visualization::RecordingWaveformData { peaks: vec![], centroids: vec![], duration: 0.0 };
+    }
+
+    let channels = state.recording_waveform_channels.load(Ordering::Relaxed) as usize;
+    let sample_rate = state.stream_sample_rate.load(Ordering::Relaxed);
+
+    // Mix to mono
+    let mono: Vec<f32> = if channels > 1 {
+        buf.chunks(channels)
+            .map(|frame| frame.iter().sum::<f32>() / channels as f32)
+            .collect()
+    } else {
+        buf
+    };
+
+    let duration = mono.len() as f64 / sample_rate as f64;
+
+    visualization::compute_recording_waveform(&mono, sample_rate, num_bars, duration)
 }

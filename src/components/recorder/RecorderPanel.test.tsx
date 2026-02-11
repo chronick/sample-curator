@@ -24,6 +24,14 @@ vi.mock("../../store/recorderStore", () => ({
   useRecorderStore: (selector: any) => selector(mockState),
 }));
 
+vi.mock("../../store", () => ({
+  useStore: (selector: any) => selector({
+    setActiveView: vi.fn(),
+    setFilters: vi.fn(),
+    setSort: vi.fn(),
+  }),
+}));
+
 vi.mock("../../hooks/useRecorder", () => ({
   useRecorder: () => ({
     selectDevice: vi.fn(),
@@ -89,9 +97,33 @@ describe("RecorderPanel", () => {
   });
 
   it("shows Saved to library when lastSavedSample is set", () => {
-    mockState.lastSavedSample = { sample_id: 42, path: "/test.wav" };
+    mockState.lastSavedSample = { sample_id: 42, path: "/test.wav", analyzed: true, pack_name: "Recordings" };
     render(<RecorderPanel />);
     expect(screen.getByText("Saved to library")).toBeInTheDocument();
     expect(screen.getByText("#42")).toBeInTheDocument();
+  });
+
+  it("shows Analyzed text when analyzed is true", () => {
+    mockState.lastSavedSample = { sample_id: 10, path: "/test.wav", analyzed: true, pack_name: null };
+    render(<RecorderPanel />);
+    expect(screen.getByText("Analyzed")).toBeInTheDocument();
+  });
+
+  it("does NOT show Analyzed text when analyzed is false", () => {
+    mockState.lastSavedSample = { sample_id: 10, path: "/test.wav", analyzed: false, pack_name: null };
+    render(<RecorderPanel />);
+    expect(screen.queryByText("Analyzed")).not.toBeInTheDocument();
+  });
+
+  it("shows pack name when pack_name is set", () => {
+    mockState.lastSavedSample = { sample_id: 10, path: "/test.wav", analyzed: false, pack_name: "Recordings" };
+    render(<RecorderPanel />);
+    expect(screen.getByText("Recordings")).toBeInTheDocument();
+  });
+
+  it("does NOT show pack name when pack_name is null", () => {
+    mockState.lastSavedSample = { sample_id: 10, path: "/test.wav", analyzed: true, pack_name: null };
+    render(<RecorderPanel />);
+    expect(screen.queryByText("Recordings")).not.toBeInTheDocument();
   });
 });

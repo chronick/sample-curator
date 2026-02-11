@@ -6,6 +6,7 @@
 #[cfg(feature = "automation")]
 mod automation;
 mod analysis;
+mod analysis_pipeline;
 mod audio;
 mod categorization;
 mod db_commands;
@@ -154,7 +155,7 @@ fn recorder_get_recording_status(state: State<'_, RecorderState>) -> Result<reco
 
 #[tauri::command]
 fn recorder_get_audio_levels(state: State<'_, RecorderState>) -> Result<recorder::metering::LevelData, String> {
-    let levels = state.levels.lock().map_err(|e| e.to_string())?;
+    let levels = state.smoothed_levels.lock().map_err(|e| e.to_string())?;
     Ok(levels.clone())
 }
 
@@ -172,6 +173,14 @@ fn recorder_get_spectrum_data(
     state: State<'_, RecorderState>,
 ) -> Result<Vec<f32>, String> {
     Ok(recorder::audio_capture::get_spectrum_snapshot(&state, num_bins.unwrap_or(128)))
+}
+
+#[tauri::command]
+fn recorder_get_recording_waveform(
+    num_bars: Option<usize>,
+    state: State<'_, RecorderState>,
+) -> Result<recorder::visualization::RecordingWaveformData, String> {
+    Ok(recorder::audio_capture::get_recording_waveform(&state, num_bars.unwrap_or(800)))
 }
 
 #[tauri::command]
@@ -218,6 +227,8 @@ fn recorder_set_config(config: recorder::config::RecorderConfig, state: State<'_
 struct RecorderSaveResult {
     sample_id: i64,
     path: String,
+    analyzed: bool,
+    pack_name: Option<String>,
 }
 
 #[tauri::command]
@@ -234,7 +245,17 @@ fn recorder_save_to_library(
     let spec = reader.spec();
     let duration = reader.duration() as f64 / spec.sample_rate as f64;
 
-    // Insert sample into library
+    // Get or create a "Recordings" pack
+    let recordings_dir = dirs::home_dir()
+        .unwrap_or_default()
+        .join(".music-hub-data")
+        .join("recordings");
+    let recordings_dir_str = recordings_dir.to_string_lossy().to_string();
+    let pack_id = db
+        .get_or_create_pack(&recordings_dir_str, "Recordings", Some("recorded"))
+        .ok();
+
+    // Insert sample into library (with pack)
     let sample_id = db
         .insert_sample(
             &path,
@@ -243,7 +264,7 @@ fn recorder_save_to_library(
             Some(duration),
             Some(spec.sample_rate as i32),
             Some(spec.channels as i32),
-            None,
+            pack_id,
         )
         .map_err(|e| e.to_string())?;
 
@@ -256,9 +277,20 @@ fn recorder_save_to_library(
     // Always add "recorded" tag
     let _ = db.add_tag_to_sample(sample_id, "recorded");
 
+    // Select pipeline based on tags and run analysis
+    let tag_refs: Vec<&str> = tags.iter().map(|s| s.as_str()).collect();
+    let pipeline = analysis_pipeline::pipeline_for_tags(&tag_refs);
+    let analysis_result = analysis_pipeline::analyze_sample(db, sample_id, &path, pipeline);
+
+    let pack_name = pack_id.and_then(|pid| {
+        db.get_pack(pid).ok().flatten().map(|p| p.name)
+    });
+
     Ok(RecorderSaveResult {
         sample_id,
         path,
+        analyzed: analysis_result.analyzed,
+        pack_name,
     })
 }
 
@@ -375,6 +407,7 @@ fn main() {
             recorder_get_audio_levels,
             recorder_get_waveform_data,
             recorder_get_spectrum_data,
+            recorder_get_recording_waveform,
             recorder_get_recordings_dir,
             recorder_open_recordings_dir,
             recorder_get_config,
