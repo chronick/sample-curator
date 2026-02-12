@@ -1,0 +1,38 @@
+[package]
+name = "sample-library-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Core library operations for sample-curator: database, embeddings, similarity search"
+
+[dependencies]
+# Database
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# Vector similarity search
+usearch = "2.16"
+
+# Audio analysis (for embedding extraction)
+sample-analysis-core = { path = "../sample-analysis-core" }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# File watching
+notify = { version = "8.0", default-features = false, features = ["macos_fsevent"] }
+
+# Parallelism
+rayon = "1.10"
+
+# Error handling
+thiserror = "2.0"
+
+# Logging
+log = "0.4"
+
+# Key/scale utilities
+regex = "1.11"
+
+[dev-dependencies]
+tempfile = "3.14"
