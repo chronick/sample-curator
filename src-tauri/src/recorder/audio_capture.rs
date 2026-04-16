@@ -522,19 +522,27 @@ pub fn start_recording(config: RecordingConfig, state: &RecorderState) -> Result
 
     // Use actual device stream properties for the WAV file
     let sample_rate = state.stream_sample_rate.load(Ordering::Relaxed);
-    let channels = state.stream_channels.load(Ordering::Relaxed);
+    let stream_channels = state.stream_channels.load(Ordering::Relaxed).max(1);
+
+    // Honor requested channel count from config, capped at what the device provides.
+    // 0 is invalid; fall back to the stream's native channel count.
+    let requested_channels = if config.channels == 0 {
+        stream_channels
+    } else {
+        config.channels.min(stream_channels)
+    };
     let bit_depth = config.bit_depth;
     let file_path = filepath.clone();
 
     eprintln!(
-        "Recording: {}ch, {}Hz, {}-bit -> {}",
-        channels, sample_rate, bit_depth, file_path
+        "Recording: {}ch (from {}ch stream), {}Hz, {}-bit -> {}",
+        requested_channels, stream_channels, sample_rate, bit_depth, file_path
     );
 
     // Spawn writer thread
     let writer_handle = std::thread::spawn(move || {
         let spec = hound::WavSpec {
-            channels,
+            channels: requested_channels,
             sample_rate,
             bits_per_sample: bit_depth,
             sample_format: if bit_depth == 32 {
@@ -552,8 +560,25 @@ pub fn start_recording(config: RecordingConfig, state: &RecorderState) -> Result
             }
         };
 
+        let src_ch = stream_channels as usize;
+        let dst_ch = requested_channels as usize;
+        let downmix = dst_ch < src_ch;
+
         for chunk in rx {
-            for &sample in &chunk {
+            // The audio callback sends interleaved frames of `src_ch` samples.
+            // When the user requested fewer channels, keep the first `dst_ch` of each frame.
+            // (Simple channel selection; avoids summing that would need per-channel gain staging.)
+            let iter: Box<dyn Iterator<Item = f32>> = if downmix {
+                Box::new(
+                    chunk
+                        .chunks_exact(src_ch)
+                        .flat_map(move |frame| frame.iter().take(dst_ch).copied()),
+                )
+            } else {
+                Box::new(chunk.into_iter())
+            };
+
+            for sample in iter {
                 match bit_depth {
                     16 => {
                         let s = (sample * 32767.0).clamp(-32768.0, 32767.0) as i16;
@@ -604,16 +629,17 @@ pub fn start_recording(config: RecordingConfig, state: &RecorderState) -> Result
         *rc = Some(RecordingConfig {
             sample_rate,
             bit_depth,
-            channels,
+            channels: requested_channels,
             output_dir: config.output_dir,
             session_name: config.session_name,
         });
     }
 
-    // Clear recording waveform cache
+    // Clear recording waveform cache.
+    // Cache operates on raw stream data (pre-downmix), so use stream_channels.
     {
         let mut cache = state.recording_waveform_cache.lock().map_err(|e| e.to_string())?;
-        cache.clear(sample_rate, channels);
+        cache.clear(sample_rate, stream_channels);
     }
 
     state.writer_finalized.store(false, Ordering::Release);
