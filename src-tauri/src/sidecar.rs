@@ -19,23 +19,31 @@ impl SidecarManager {
             .map(PathBuf::from)
             .unwrap_or_else(|_| std::env::current_dir().unwrap());
 
-        // The sidecar is at ../sidecar/run_sidecar.py relative to src-tauri
-        let sidecar_script = manifest_dir
+        // The sidecar's Python package + pyproject.toml live at
+        // sample-curator/sidecar/, two dirs up from the Tauri manifest's parent.
+        // We run `uv run` from that dir so it picks up the sidecar's own venv
+        // (which has librosa, numpy, soundfile, etc.). Running from anywhere
+        // else leaves `uv` hunting for a pyproject.toml it can't find, or
+        // worse, activating some unrelated venv that lacks our deps.
+        let sidecar_dir = manifest_dir
             .parent()
-            .map(|p| p.join("sidecar").join("run_sidecar.py"))
-            .unwrap_or_else(|| manifest_dir.join("sidecar").join("run_sidecar.py"));
+            .map(|p| p.join("sidecar"))
+            .unwrap_or_else(|| manifest_dir.join("sidecar"));
+        let sidecar_script = sidecar_dir.join("run_sidecar.py");
 
-        // The music-hub project root (for uv to find dependencies)
-        let project_root = manifest_dir
-            .parent() // sample-curator
-            .and_then(|p| p.parent()) // packages
-            .and_then(|p| p.parent()) // music-hub
-            .unwrap_or_else(|| &manifest_dir);
+        if !sidecar_dir.join("pyproject.toml").exists() {
+            eprintln!(
+                "Warning: sidecar pyproject.toml not found at {}. Python sidecar will likely fail to find deps.",
+                sidecar_dir.display()
+            );
+        }
 
-        // Spawn the Python sidecar process using uv
+        // Spawn the Python sidecar process using uv. Use the sidecar-api
+        // entrypoint declared in pyproject.toml; it syncs deps on first run
+        // if the venv is missing.
         let mut process = Command::new("uv")
             .args(["run", "python", sidecar_script.to_str().unwrap()])
-            .current_dir(project_root)
+            .current_dir(&sidecar_dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())

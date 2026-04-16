@@ -212,6 +212,128 @@ class TestMoodAdjective:
             )
 
 
+class TestTranscription:
+    def _make_features(self, **overrides) -> naming._HeuristicFeatures:
+        # Default: looks like speech (mid centroid, moderate ZCR, decent RMS)
+        base = dict(rms=0.05, centroid=1500.0, zcr=0.08, dur_s=2.0, tempo=120.0)
+        base.update(overrides)
+        return naming._HeuristicFeatures(**base)
+
+    def test_looks_like_speech_true_for_speech_features(self):
+        f = self._make_features()
+        assert naming._looks_like_speech(f) is True
+
+    def test_looks_like_speech_rejects_very_short_clips(self):
+        f = self._make_features(dur_s=0.3)
+        assert naming._looks_like_speech(f) is False
+
+    def test_looks_like_speech_rejects_silent_clips(self):
+        f = self._make_features(rms=0.001)
+        assert naming._looks_like_speech(f) is False
+
+    def test_looks_like_speech_rejects_very_bright_clips(self):
+        # High-centroid percussive hits shouldn't be sent to Whisper
+        f = self._make_features(centroid=6000.0)
+        assert naming._looks_like_speech(f) is False
+
+    def test_looks_like_speech_rejects_very_low_zcr(self):
+        # Pure drones / sustained synths — not speech
+        f = self._make_features(zcr=0.01)
+        assert naming._looks_like_speech(f) is False
+
+    def test_transcribe_returns_none_without_faster_whisper(self, tmp_path):
+        # Even if the clip is speech-like, transcription should fail gracefully
+        # when the module isn't importable.
+        p = tmp_path / "clip.wav"
+        _write_wav(p, duration_s=1.0, freq=440.0)
+        with patch.dict("sys.modules", {"faster_whisper": None}):
+            result = naming._transcribe_to_stem(str(p))
+            assert result is None
+
+    def test_transcribe_uses_content_words_and_skips_stopwords(self, tmp_path):
+        p = tmp_path / "clip.wav"
+        _write_wav(p, duration_s=1.0, freq=440.0)
+
+        # Mock the WhisperModel so the test doesn't actually download models.
+        fake_segments = [
+            type("Seg", (), {"text": "um the quick brown fox jumped"})(),
+        ]
+
+        class FakeModel:
+            def transcribe(self, path, **kwargs):
+                return iter(fake_segments), None
+
+        with patch.object(naming, "_get_whisper_model", return_value=FakeModel()):
+            with patch.dict("sys.modules", {"faster_whisper": type("M", (), {})()}):
+                result = naming._transcribe_to_stem(str(p), max_words=3)
+                # Stopwords ("the", "um") skipped, first 3 content words joined
+                assert result == "quick-brown-fox"
+
+    def test_transcribe_returns_none_when_transcript_is_only_stopwords(self, tmp_path):
+        p = tmp_path / "clip.wav"
+        _write_wav(p, duration_s=1.0, freq=440.0)
+        fake_segments = [type("Seg", (), {"text": "um uh the a and so"})()]
+
+        class FakeModel:
+            def transcribe(self, path, **kwargs):
+                return iter(fake_segments), None
+
+        with patch.object(naming, "_get_whisper_model", return_value=FakeModel()):
+            with patch.dict("sys.modules", {"faster_whisper": type("M", (), {})()}):
+                result = naming._transcribe_to_stem(str(p))
+                assert result is None
+
+    def test_name_recording_skips_transcription_when_disabled(self, tmp_path):
+        p = tmp_path / "session_20260415_183012.wav"
+        _write_wav(p, duration_s=1.0, freq=440.0)
+        with patch.object(naming, "_transcribe_to_stem") as mock:
+            naming.name_recording(str(p), use_clap=False, use_transcription=False)
+            mock.assert_not_called()
+
+    def test_name_recording_uses_transcription_when_speech_detected(self, tmp_path):
+        p = tmp_path / "session_20260415_183012.wav"
+        _write_wav(p, duration_s=1.0, freq=440.0)
+        # Force the features check to think this is speech
+        with patch.object(naming, "_looks_like_speech", return_value=True):
+            with patch.object(
+                naming,
+                "_transcribe_to_stem",
+                return_value="testing-microphone",
+            ):
+                result = naming.name_recording(str(p), use_clap=False)
+                assert result["method"] == "transcription"
+                assert result["stem"] == "testing-microphone"
+                assert "vocal" in result["tags"]
+
+    def test_name_recording_uses_transcription_when_clap_says_vocal(self, tmp_path):
+        p = tmp_path / "session_20260415_183012.wav"
+        _write_wav(p, duration_s=1.0, freq=440.0)
+        with patch.object(
+            naming,
+            "_try_clap",
+            return_value=[("vocal", 0.9), ("voice", 0.3)],
+        ):
+            with patch.object(
+                naming,
+                "_transcribe_to_stem",
+                return_value="hello-world",
+            ):
+                result = naming.name_recording(str(p), use_clap=True)
+                assert result["method"] == "transcription"
+                assert result["stem"] == "hello-world"
+                # CLAP vocal tags preserved
+                assert "vocal" in result["tags"]
+
+    def test_name_recording_falls_back_to_heuristic_when_transcription_empty(self, tmp_path):
+        p = tmp_path / "session_20260415_183012.wav"
+        _write_wav(p, duration_s=1.0, freq=440.0)
+        with patch.object(naming, "_looks_like_speech", return_value=True):
+            with patch.object(naming, "_transcribe_to_stem", return_value=None):
+                result = naming.name_recording(str(p), use_clap=False)
+                # Transcription declined → heuristic or heroku, not transcription
+                assert result["method"] != "transcription"
+
+
 class TestHandlerRegistration:
     def test_name_recording_registered(self):
         assert "name_recording" in HANDLERS

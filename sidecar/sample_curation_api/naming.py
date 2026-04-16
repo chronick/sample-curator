@@ -403,11 +403,103 @@ def _heuristic_tag(path: str) -> str | None:
     return _heuristic_tag_from_features(features)
 
 
+# Words to skip when pulling a stem out of a transcript. We want content
+# words that carry meaning ("testing microphone" → "testing-microphone"),
+# not filler ("um the uh you know what I mean" → garbage). Lowercased.
+TRANSCRIPTION_STOPWORDS: frozenset[str] = frozenset({
+    "the", "a", "an", "and", "or", "but", "so", "for", "with", "on", "in",
+    "at", "to", "of", "by", "as", "is", "am", "are", "was", "were", "be",
+    "been", "being", "have", "has", "had", "do", "does", "did", "will",
+    "would", "should", "could", "may", "might", "can", "must", "shall",
+    "i", "you", "he", "she", "it", "we", "they", "me", "him", "her", "us",
+    "them", "my", "your", "his", "hers", "its", "our", "their", "mine",
+    "yours", "theirs", "this", "that", "these", "those", "what", "which",
+    "who", "whom", "whose", "where", "when", "why", "how",
+    "um", "uh", "er", "ah", "oh", "hmm", "mm", "like", "just", "really",
+    "very", "okay", "ok", "yeah", "yes", "no", "nope", "well",
+})
+
+
+def _looks_like_speech(f: _HeuristicFeatures) -> bool:
+    """Cheap pre-check before we fire up a Whisper model. Speech tends to
+    sit in the 300-4500 Hz centroid band with moderate ZCR and decent RMS.
+    Drum hits (very short + high ZCR) and pure drones (low ZCR, very stable
+    centroid) get rejected here so we don't waste a transcription round-trip
+    on non-vocal material.
+    """
+    if f.dur_s < 0.5:
+        return False
+    if f.rms < 0.005:
+        return False
+    if f.centroid < 300 or f.centroid > 4500:
+        return False
+    if f.zcr < 0.03 or f.zcr > 0.25:
+        return False
+    return True
+
+
+_WHISPER_MODEL = None
+
+
+def _get_whisper_model():
+    """Lazy-load a tiny Whisper model on first use. ``tiny`` is ~75MB
+    and transcribes ~30x realtime on CPU — more than fast enough for a
+    handful-of-seconds sample.
+    """
+    global _WHISPER_MODEL
+    if _WHISPER_MODEL is None:
+        from faster_whisper import WhisperModel  # type: ignore
+
+        _WHISPER_MODEL = WhisperModel("tiny", device="cpu", compute_type="int8")
+    return _WHISPER_MODEL
+
+
+def _transcribe_to_stem(path: str, max_words: int = 3) -> str | None:
+    """Transcribe the clip via Whisper and extract up to `max_words` content
+    words as a hyphenated filename stem. Returns ``None`` if faster-whisper
+    isn't installed, the transcript is empty, or no content words survive
+    the stopword/length filter.
+    """
+    try:
+        import faster_whisper  # noqa: F401  (just the import check)
+    except Exception:
+        return None
+
+    try:
+        model = _get_whisper_model()
+        # beam_size=1 is the fastest option; we don't need optimal decoding
+        # for a filename. Language hint avoids misdetection on short clips.
+        segments, _info = model.transcribe(path, beam_size=1, language="en", vad_filter=True)
+        words: list[str] = []
+        for seg in segments:
+            for raw in seg.text.split():
+                cleaned = "".join(c for c in raw.lower() if c.isalpha())
+                if len(cleaned) < 3:
+                    continue
+                if cleaned in TRANSCRIPTION_STOPWORDS:
+                    continue
+                words.append(cleaned)
+                if len(words) >= max_words:
+                    break
+            if len(words) >= max_words:
+                break
+        if not words:
+            return None
+        return "-".join(words)
+    except Exception as e:
+        log.warning("Whisper transcription failed for %s: %s", path, e)
+        return None
+
+
+VOCAL_TAGS: frozenset[str] = frozenset({"vocal", "voice"})
+
+
 def name_recording(
     path: str,
     bpm: float | None = None,
     key: str | None = None,
     use_clap: bool = True,
+    use_transcription: bool = True,
 ) -> dict:
     """Produce a descriptive filename stem for a fresh recording.
 
@@ -418,10 +510,13 @@ def name_recording(
         use_clap: If False, skip CLAP and use only heuristic + heroku paths.
             Useful for tests and for power users who don't want the ~1.5GB
             model download.
+        use_transcription: If False, skip Whisper transcription even when the
+            clip looks like speech. Useful for tests and for power users who
+            don't want to pull in the `transcription` extra.
 
     Returns:
         Dict with keys ``stem``, ``tags`` (list of str), and ``method``
-        (one of ``"clap"``, ``"heuristic"``, ``"heroku"``).
+        (one of ``"clap"``, ``"transcription"``, ``"heuristic"``, ``"heroku"``).
     """
     if not os.path.exists(path):
         raise FileNotFoundError(path)
@@ -436,11 +531,16 @@ def name_recording(
     # audio twice when both paths run.
     features = _extract_features(path)
 
+    # Track whether CLAP has flagged the clip as vocal content — this is a
+    # stronger signal than the cheap speech heuristic and takes priority.
+    clap_says_vocal = False
+
     if use_clap:
         clap_result = _try_clap(path)
         if clap_result and clap_result[0][1] >= CLAP_MIN_CONFIDENCE:
             top_tag = clap_result[0][0]
             tags = [t for t, c in clap_result[:3] if c >= 0.2]
+            clap_says_vocal = top_tag in VOCAL_TAGS
             # Give CLAP names a mood adjective too when features are available.
             # `amber-kick` is more memorable than bare `kick`, and stays
             # deterministic per file so re-runs match.
@@ -450,6 +550,27 @@ def name_recording(
             else:
                 base = top_tag
             method = "clap"
+
+    # Vocal-aware naming: if this looks like speech (CLAP said so, or the
+    # cheap spectral heuristic says so), try to transcribe it and use the
+    # first few content words as the stem. Produces names like
+    # `testing-microphone` or `we-ride-eternal` that are far more useful for
+    # recall than `amber-voice` or bare heuristic tags.
+    if use_transcription and features is not None:
+        looks_vocal = clap_says_vocal or _looks_like_speech(features)
+        if looks_vocal:
+            transcript_stem = _transcribe_to_stem(path)
+            if transcript_stem:
+                # When CLAP was confident the sample was vocal, preserve the
+                # vocal tag alongside the transcript-derived name so library
+                # search by tag still works.
+                if clap_says_vocal:
+                    # Keep existing CLAP tags (already populated above)
+                    pass
+                else:
+                    tags = ["vocal"]
+                base = transcript_stem
+                method = "transcription"
 
     if base is None and features is not None:
         heur = _heuristic_tag_from_features(features)
