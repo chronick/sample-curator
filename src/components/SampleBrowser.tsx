@@ -30,7 +30,41 @@ const SORTABLE_COLUMNS: Array<{ key: string; label: string; className: string; a
   { key: "applicability_score", label: "Score", className: "w-20 px-2 py-2 text-right", align: "right" },
   { key: "bpm", label: "BPM", className: "w-16 px-2 py-2 text-right", align: "right" },
   { key: "key", label: "Key", className: "w-16 px-2 py-2" },
+  { key: "created_at", label: "Created", className: "w-20 px-2 py-2 text-right", align: "right" },
 ];
+
+/** Threshold (ms) under which a sample is visually flagged as "just recorded". */
+const FRESH_WINDOW_MS = 5 * 60 * 1000;
+
+/** Produce a short "2m ago" / "3h ago" / "2d ago" string from an ISO timestamp. */
+export function formatRelativeTime(isoTimestamp: string | null | undefined, now: number = Date.now()): string {
+  if (!isoTimestamp) return "-";
+  const ts = Date.parse(isoTimestamp);
+  if (Number.isNaN(ts)) return "-";
+  const deltaMs = now - ts;
+  if (deltaMs < 0) return "just now"; // clock skew — don't show future times
+  const sec = Math.floor(deltaMs / 1000);
+  if (sec < 10) return "just now";
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 30) return `${day}d ago`;
+  const mo = Math.floor(day / 30);
+  if (mo < 12) return `${mo}mo ago`;
+  const yr = Math.floor(day / 365);
+  return `${yr}y ago`;
+}
+
+/** True if the sample was created within the last FRESH_WINDOW_MS. */
+export function isFreshlyRecorded(isoTimestamp: string | null | undefined, now: number = Date.now()): boolean {
+  if (!isoTimestamp) return false;
+  const ts = Date.parse(isoTimestamp);
+  if (Number.isNaN(ts)) return false;
+  return now - ts < FRESH_WINDOW_MS && now - ts >= 0;
+}
 
 function SortIndicator({ field, sortConfig }: { field: string; sortConfig?: SortConfig }) {
   if (!sortConfig || sortConfig.field !== field) {
@@ -150,14 +184,18 @@ export function SampleBrowser({
           const sample = samples[virtualItem.index];
           const isSelected = selectedSample?.id === sample.id;
           const isChecked = selectedIds.has(sample.id);
+          const isFresh = isFreshlyRecorded(sample.created_at);
           return (
             <div
               key={sample.id}
+              data-testid={isFresh ? "fresh-sample-row" : undefined}
               className={`absolute top-0 left-0 w-full flex items-center cursor-pointer transition-colors ${
                 isSelected
                   ? "bg-accent/20 border-l-2 border-accent"
                   : isChecked
                   ? "bg-surface-hover"
+                  : isFresh
+                  ? "bg-emerald-500/10 hover:bg-emerald-500/15"
                   : "hover:bg-surface-hover"
               }`}
               style={{
@@ -178,8 +216,16 @@ export function SampleBrowser({
                   className="rounded border-surface-border"
                 />
               </div>
-              <div className="flex-1 px-2 truncate text-sm">
-                {sample.path.split("/").pop()}
+              <div className="flex-1 px-2 truncate text-sm flex items-center gap-2">
+                <span className="truncate">{sample.path.split("/").pop()}</span>
+                {isFresh && (
+                  <span
+                    className="px-1.5 py-0.5 rounded bg-emerald-500/25 text-emerald-300 text-[9px] tracking-wide uppercase border border-emerald-600/40"
+                    title="Recorded or imported within the last 5 minutes"
+                  >
+                    new
+                  </span>
+                )}
               </div>
               <div className="w-20 px-2 text-right">
                 <ScoreIndicator score={sample.applicability_score} />
@@ -189,6 +235,14 @@ export function SampleBrowser({
               </div>
               <div className="w-16 px-2 text-sm text-gray-400">
                 {sample.key || "-"}
+              </div>
+              <div
+                className={`w-20 px-2 text-right text-xs tabular-nums ${
+                  isFresh ? "text-emerald-400" : "text-gray-500"
+                }`}
+                title={sample.created_at}
+              >
+                {formatRelativeTime(sample.created_at)}
               </div>
               <div className="w-48 px-2 flex gap-1 overflow-hidden">
                 {(sample.tags || []).slice(0, 3).map((tag) => {

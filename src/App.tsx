@@ -11,6 +11,7 @@ import { ProjectsPanel } from "./components/ProjectsPanel";
 import { DuplicatesPanel } from "./components/DuplicatesPanel";
 import { QueryBar } from "./components/QueryBar";
 import { FilterBreadcrumbs } from "./components/FilterBreadcrumbs";
+import { BrowseQuickActions } from "./components/BrowseQuickActions";
 import { TabBar } from "./components/TabBar";
 import { SampleDetails } from "./components/SampleDetails";
 import { BatchActionsPanel } from "./components/BatchActionsPanel";
@@ -348,13 +349,30 @@ function AppContent() {
                 <JobProgressBar />
               </div>
 
-              {/* Query bar */}
-              <div className="px-4 py-2 border-b border-surface-border bg-surface">
-                <QueryBar
-                  filters={filters}
-                  onFiltersChange={setFilters}
-                  allTags={allTags}
-                  packs={packs}
+              {/* Query bar + quick actions */}
+              <div className="px-4 py-2 border-b border-surface-border bg-surface flex items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <QueryBar
+                    filters={filters}
+                    onFiltersChange={setFilters}
+                    allTags={allTags}
+                    packs={packs}
+                  />
+                </div>
+                <BrowseQuickActions
+                  sortField={sortField}
+                  sortDirection={sortDirection}
+                  onSort={(field, direction) =>
+                    useStore.getState().setSort(field, direction)
+                  }
+                  onApplyRecent={() => {
+                    // One-click: jump to newest. Reset tag/pack/query filters
+                    // so the user sees their whole library sorted by recency
+                    // — useful immediately after a recording session to audit
+                    // what landed, regardless of prior filter state.
+                    resetFilters();
+                    useStore.getState().setSort("created_at", "desc");
+                  }}
                 />
               </div>
 
