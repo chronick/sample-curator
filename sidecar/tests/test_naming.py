@@ -134,6 +134,84 @@ class TestNameRecording:
             assert "hat" not in result["tags"]
 
 
+class TestMoodAdjective:
+    def _make_features(self, **overrides) -> naming._HeuristicFeatures:
+        base = dict(rms=0.1, centroid=2000.0, zcr=0.1, dur_s=1.0, tempo=120.0)
+        base.update(overrides)
+        return naming._HeuristicFeatures(**base)
+
+    def test_bright_clip_picks_from_bright_pool(self):
+        # Repeat with many seeds to exercise the candidate pool
+        seen: set[str] = set()
+        for seed in ["a", "b", "c", "d", "e", "f", "g", "h"]:
+            f = self._make_features(centroid=5000.0)  # bright
+            adj = naming._mood_adjective_from_features(f, seed)
+            seen.add(adj)
+        # All picks should be from the bright pool (plus short/etc. if they
+        # happened to be bucketed in). Key assertion: bright words show up.
+        assert seen & set(naming.MOOD_ADJECTIVES["bright"])
+        # And the dark pool should NOT be mixed in for a bright clip.
+        assert not (seen & set(naming.MOOD_ADJECTIVES["dark"]))
+
+    def test_dark_clip_picks_from_dark_pool(self):
+        seen: set[str] = set()
+        for seed in ["a", "b", "c", "d", "e", "f", "g", "h"]:
+            f = self._make_features(centroid=500.0)  # dark
+            adj = naming._mood_adjective_from_features(f, seed)
+            seen.add(adj)
+        assert seen & set(naming.MOOD_ADJECTIVES["dark"])
+        assert not (seen & set(naming.MOOD_ADJECTIVES["bright"]))
+
+    def test_neutral_features_fall_back_to_neutral_pool(self):
+        # Mid-band everything → no buckets trip → neutral fallback
+        f = self._make_features(centroid=2000.0, rms=0.08, zcr=0.1, dur_s=1.5)
+        adj = naming._mood_adjective_from_features(f, "seed")
+        assert adj in naming.MOOD_ADJECTIVES["neutral"]
+
+    def test_deterministic_per_seed(self):
+        f = self._make_features()
+        a = naming._mood_adjective_from_features(f, "same-seed")
+        b = naming._mood_adjective_from_features(f, "same-seed")
+        assert a == b
+
+    def test_heuristic_stem_uses_adjective(self, tmp_path):
+        # Short + mid-centroid clip → "perc". Expect `<adj>-perc`.
+        p = tmp_path / "session_20260415_183012.wav"
+        sr = 22050
+        n = int(0.3 * sr)  # 300ms
+        import numpy as np
+
+        rng = np.random.default_rng(7)
+        data = (rng.normal(0, 0.2, n).clip(-1, 1) * 32767).astype(np.int16)
+        with wave.open(str(p), "w") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(sr)
+            w.writeframes(data.tobytes())
+
+        result = naming.name_recording(str(p), use_clap=False)
+        if result["method"] == "heuristic":
+            # adj-tag pattern
+            assert "-" in result["stem"], f"expected compound stem, got {result['stem']!r}"
+            # Tag still surfaces (kick/hat/perc/etc.) even if mood adjective was prepended
+            assert result["tags"], "heuristic path should emit at least one tag"
+
+    def test_clap_stem_uses_adjective(self, tmp_path):
+        p = tmp_path / "session_20260415_183012.wav"
+        _write_wav(p, duration_s=0.8, freq=440.0)
+        with patch.object(
+            naming,
+            "_try_clap",
+            return_value=[("kick", 0.9), ("snare", 0.3)],
+        ):
+            result = naming.name_recording(str(p), use_clap=True)
+            assert result["method"] == "clap"
+            # Should be `<adj>-kick` not bare `kick`
+            assert result["stem"].split("_")[0].endswith("-kick"), (
+                f"expected <adj>-kick, got {result['stem']!r}"
+            )
+
+
 class TestHandlerRegistration:
     def test_name_recording_registered(self):
         assert "name_recording" in HANDLERS

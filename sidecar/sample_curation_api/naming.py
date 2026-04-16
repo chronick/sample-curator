@@ -54,27 +54,103 @@ CLAP_CATEGORIES: list[tuple[str, str]] = [
 # Below this confidence we don't trust the CLAP result and fall through.
 CLAP_MIN_CONFIDENCE = 0.30
 
-# Heroku-style word lists. Kept short, evocative, and safe for filenames.
+# Heroku-style word lists. Evocative, safe for filenames, tuned for
+# sonic/textural/atmospheric vibes rather than generic UUID-alternatives.
+# Word count targets: ~150 adjectives, ~130 nouns — enough that collisions
+# within a session are vanishingly rare even at a dozen takes/minute.
 ADJECTIVES: list[str] = [
-    "autumn", "silver", "amber", "crimson", "ember", "frosted", "hollow",
-    "wild", "quiet", "violet", "midnight", "restless", "drifting", "muted",
-    "soft", "brittle", "molten", "still", "dusty", "warm", "distant",
-    "neon", "salted", "faded", "gilded", "rusted", "hushed", "winter",
-    "summer", "coastal", "feral", "rolling", "forgotten", "tangled",
-    "tidal", "paper", "velvet", "lingering", "cobalt", "copper",
-    "fractured", "slanted", "sunken", "coral", "glassy", "stormy",
-    "granite", "blurred", "pine", "lantern",
+    # Atmospheric / weather
+    "autumn", "winter", "summer", "coastal", "tidal", "stormy", "misty",
+    "monsoon", "arctic", "tropical", "boreal", "alpine", "oceanic",
+    "twilight", "dawn", "dusk", "midnight", "vernal", "glacial",
+    "windswept", "sunlit", "moonlit", "starlit", "overcast", "humid",
+    # Material / texture
+    "brittle", "molten", "granite", "velvet", "paper", "glassy",
+    "porcelain", "leather", "satin", "linen", "concrete", "cedar",
+    "pine", "birch", "obsidian", "onyx", "marble", "copper",
+    "cobalt", "silver", "gilded", "amber", "ivory", "ebony",
+    "pewter", "quartz", "slate", "lacquered", "woven", "knotted",
+    # Color / light
+    "crimson", "violet", "teal", "saffron", "coral", "indigo",
+    "emerald", "scarlet", "carmine", "sepia", "neon", "ember",
+    "ashen", "dappled", "prismatic", "bioluminescent",
+    # Energy / motion
+    "drifting", "rolling", "restless", "lingering", "cascading",
+    "unraveling", "spiraling", "pulsing", "wandering", "slanted",
+    "tilted", "orbiting", "tumbling", "feral", "frantic",
+    "skittering", "shuddering", "trembling", "rippling",
+    # Temperature / mood
+    "warm", "cool", "tepid", "smoldering", "frozen", "chilled",
+    "simmering", "scorched", "frosted", "thawed",
+    # Quiet / sparse
+    "quiet", "hushed", "muted", "subdued", "soft", "gentle",
+    "tender", "vacant", "hollow", "distant", "faint", "ghostly",
+    "faded", "bleached",
+    # Dense / loud
+    "dense", "heavy", "sunken", "leaden", "brutal", "clamorous",
+    "churning", "surging", "seething", "teeming",
+    # Rough / aged
+    "rusted", "tarnished", "weathered", "salted", "cracked",
+    "splintered", "fractured", "worn", "patched", "stained",
+    "bruised", "frayed", "mottled", "dusty", "faulty",
+    # Natural / wild
+    "wild", "tangled", "overgrown", "primal", "ancient",
+    "forgotten", "buried", "submerged",
+    # Precision / crafted
+    "sharpened", "polished", "burnished", "etched", "carved",
+    "hammered", "woven", "stitched", "threaded", "spun",
+    # Shape / form
+    "blurred", "warped", "bent", "curled", "spiraled",
+    "knotted", "coiled", "folded",
+    # Emotional / dreamlike
+    "melancholy", "yearning", "hopeful", "wistful", "solemn",
+    "reverent", "brooding", "serene", "elated",
+    "lucid", "hazy", "dreaming", "sleeping", "waking",
+    "dissolving", "suspended",
+    # Abstract / cosmic
+    "liminal", "spectral", "transient", "ephemeral",
+    "infinite", "fractal", "crystalline", "holographic",
 ]
 
 NOUNS: list[str] = [
-    "waterfall", "meadow", "engine", "cove", "shadow", "ember", "signal",
-    "ridge", "lantern", "harbor", "valley", "thicket", "cipher", "beacon",
-    "mosaic", "atlas", "cascade", "nocturne", "drift", "echo", "glacier",
-    "grove", "tundra", "lagoon", "canyon", "eddy", "lattice", "archive",
-    "mirror", "prism", "antler", "spire", "monsoon", "tempo", "fjord",
-    "compass", "marsh", "strata", "bridge", "sparrow", "quarry", "orbit",
-    "wavefront", "alcove", "coast", "tide", "hollow", "hymn", "plume",
-    "kiln",
+    # Water / landscape
+    "waterfall", "cascade", "glacier", "lagoon", "fjord", "tide",
+    "coast", "estuary", "delta", "canyon", "crevasse",
+    "valley", "ridge", "meadow", "grove", "thicket", "tundra",
+    "marsh", "bog", "plateau", "mesa", "savanna", "steppe",
+    "reef", "shoal", "harbor", "cove", "strand", "shore",
+    # Sky / light
+    "beacon", "lantern", "prism", "mirror", "halo", "aurora",
+    "nebula", "comet", "constellation", "zenith", "horizon",
+    "firefly", "moth", "ember", "cinder", "spark",
+    # Sound / music
+    "nocturne", "lullaby", "hymn", "reverie", "elegy",
+    "cadence", "refrain", "chorus", "drone", "echo", "signal",
+    "chime", "toll", "pulse", "heartbeat",
+    # Movement / dynamic
+    "drift", "current", "eddy", "wake", "wave",
+    "wavefront", "gust", "breath", "whisper", "gale",
+    "monsoon", "tempo", "pulse",
+    # Shape / structure
+    "lattice", "spire", "tower", "arch", "bridge", "vault",
+    "column", "pillar", "gate", "arcade", "alcove", "atrium",
+    "cloister", "mosaic", "cipher", "sigil",
+    # Tools / objects
+    "compass", "atlas", "archive", "ledger", "almanac",
+    "parchment", "lens", "telescope", "kiln", "forge",
+    "loom", "hearth", "quarry", "engine", "relic", "talisman",
+    # Creatures / life
+    "sparrow", "antler", "feather", "plume", "fawn",
+    "minnow", "hare", "owl", "crow", "mantis",
+    # Atmospheres / moods
+    "shadow", "silhouette", "outline", "trace",
+    "imprint", "residue", "remnant", "memory", "echo",
+    # Paths / geometry
+    "spiral", "orbit", "meridian", "trajectory",
+    "corridor", "passage", "threshold",
+    # Patterns
+    "strata", "stratum", "layer", "veil", "weave",
+    "pattern", "filigree",
 ]
 
 
@@ -145,51 +221,186 @@ def _get_clap_model(laion_clap_mod) -> object:
     return _CLAP_MODEL
 
 
-def _heuristic_tag(path: str) -> str | None:
-    """Guess a coarse category from cheap spectral/temporal features.
+# Mood-adjective pools keyed by spectral feature bucket. When the heuristic
+# (or CLAP) produces a bare tag like "loop", we compose `{adjective}-{tag}`
+# instead — far more evocative than the bare category word. Adjective is
+# picked deterministically from the file's seed so re-running naming on the
+# same file is idempotent.
+MOOD_ADJECTIVES: dict[str, list[str]] = {
+    # Brightness (spectral centroid)
+    "bright": [
+        "amber", "gilded", "silver", "crystal", "lantern", "neon",
+        "prismatic", "sunlit", "saffron", "emerald", "glowing",
+        "luminous", "gleaming", "burnished", "shimmering", "dazzling",
+        "incandescent", "radiant",
+    ],
+    "dark": [
+        "hollow", "sunken", "shadow", "midnight", "obsidian", "tar",
+        "ebony", "onyx", "ashen", "subterranean", "buried", "submerged",
+        "cavernous", "umbral", "slate", "pitch", "murky", "dusky",
+    ],
+    # Weight / body (RMS energy)
+    "dense": [
+        "molten", "heavy", "granite", "copper", "tidal", "leaden",
+        "churning", "seething", "teeming", "brutal", "surging",
+        "monolithic", "subterranean", "volcanic", "thunderous",
+    ],
+    "thin": [
+        "paper", "drifting", "wisp", "tender", "faded", "ghostly",
+        "gossamer", "transient", "ephemeral", "vaporous",
+        "faint", "delicate", "threadbare", "translucent",
+    ],
+    # Edge / harshness (zero-crossing rate)
+    "sharp": [
+        "brittle", "fractured", "splintered", "glassy", "jagged",
+        "serrated", "shattered", "etched", "crystalline", "bristling",
+        "skittering", "clamorous",
+    ],
+    "smooth": [
+        "velvet", "hushed", "muted", "tangled", "satin", "lacquered",
+        "burnished", "seamless", "woven", "polished", "mellifluous",
+        "buttered",
+    ],
+    # Temporal character
+    "short": [
+        "crisp", "punchy", "snapped", "struck", "clipped",
+        "staccato", "taut", "abrupt", "sudden", "percussive",
+    ],
+    "long": [
+        "lingering", "trailing", "rolling", "sustained", "enduring",
+        "unfurling", "spiraling", "cascading", "wandering", "drifting",
+        "meandering", "suspended",
+    ],
+    # Generic mid-band fallback when no feature is distinctive
+    "neutral": [
+        "dusty", "pine", "coastal", "autumn", "warm", "weathered",
+        "worn", "patched", "mottled", "subdued", "tempered", "vernal",
+        "temperate", "moderate", "aged",
+    ],
+}
 
-    Returns one of ``kick``, ``hat``, ``bass``, ``pad``, ``texture``,
-    ``loop``, or ``None`` if analysis fails.
-    """
+
+class _HeuristicFeatures:
+    """Cached acoustic features for one audio clip. Keeps the librosa load
+    and feature extractions to a single pass; both ``_heuristic_tag`` and
+    ``_mood_adjective_from_features`` read from the same struct."""
+
+    __slots__ = ("rms", "centroid", "zcr", "dur_s", "tempo")
+
+    def __init__(self, rms: float, centroid: float, zcr: float, dur_s: float, tempo: float):
+        self.rms = rms
+        self.centroid = centroid
+        self.zcr = zcr
+        self.dur_s = dur_s
+        self.tempo = tempo
+
+
+def _extract_features(path: str) -> _HeuristicFeatures | None:
+    """Load the clip once and pull the four features we need. Returns
+    ``None`` if the clip is too short/quiet to analyse."""
     try:
         import librosa
         import numpy as np
 
         y, sr = librosa.load(path, sr=22050, mono=True, duration=6.0)
-        if y.size < sr // 4:  # < 250ms, too short to classify
+        if y.size < sr // 4:  # < 250ms, too short
             return None
 
         rms = float(np.sqrt(np.mean(y**2)))
         if rms < 1e-4:
             return None
 
-        # Duration, ZCR, centroid, tempo
         dur_s = y.size / sr
         centroid = float(np.mean(librosa.feature.spectral_centroid(y=y, sr=sr)))
         zcr = float(np.mean(librosa.feature.zero_crossing_rate(y)))
         onset_env = librosa.onset.onset_strength(y=y, sr=sr)
         tempo = float(librosa.feature.tempo(onset_envelope=onset_env, sr=sr)[0])
 
-        # Dumb decision tree. Tuned to be "better than generic session" not
-        # "actually correct". CLAP handles the real classification when available.
-        if dur_s < 0.6:
-            if centroid > 5000 or zcr > 0.25:
-                return "hat"
-            if centroid < 700:
-                return "kick"
-            return "perc"
-        if dur_s > 2.5 and tempo > 60:
-            return "loop"
-        if centroid < 500:
-            return "bass"
-        if centroid > 3500 and rms < 0.1:
-            return "texture"
-        if dur_s > 1.5 and centroid < 2000:
-            return "pad"
-        return None
+        return _HeuristicFeatures(rms=rms, centroid=centroid, zcr=zcr, dur_s=dur_s, tempo=tempo)
     except Exception as e:
-        log.warning("Heuristic naming failed: %s", e)
+        log.warning("Feature extraction failed: %s", e)
         return None
+
+
+def _heuristic_tag_from_features(f: _HeuristicFeatures) -> str | None:
+    """Coarse category from the cached features. Returns one of ``kick``,
+    ``hat``, ``perc``, ``bass``, ``pad``, ``texture``, ``loop``, or ``None``.
+
+    Same decision tree as before — kept deliberately simple; CLAP handles
+    the real classification when available.
+    """
+    if f.dur_s < 0.6:
+        if f.centroid > 5000 or f.zcr > 0.25:
+            return "hat"
+        if f.centroid < 700:
+            return "kick"
+        return "perc"
+    if f.dur_s > 2.5 and f.tempo > 60:
+        return "loop"
+    if f.centroid < 500:
+        return "bass"
+    if f.centroid > 3500 and f.rms < 0.1:
+        return "texture"
+    if f.dur_s > 1.5 and f.centroid < 2000:
+        return "pad"
+    return None
+
+
+def _mood_adjective_from_features(f: _HeuristicFeatures, seed: str) -> str:
+    """Pick a mood adjective by bucketing the features, then sampling
+    deterministically from the candidate pool keyed by `seed`.
+
+    The bucketing chooses *which* pools contribute candidates (a bright
+    clip surfaces amber/gilded/silver; a thin+dark clip surfaces
+    wisp/paper/hollow/shadow). The seed then picks a single word from
+    the combined pool. Two clips with similar spectral content drift
+    through similar adjective families while still having distinct names.
+    """
+    candidates: list[str] = []
+
+    # Brightness bucket (spectral centroid)
+    if f.centroid > 3000:
+        candidates.extend(MOOD_ADJECTIVES["bright"])
+    elif f.centroid < 800:
+        candidates.extend(MOOD_ADJECTIVES["dark"])
+
+    # Weight bucket (RMS)
+    if f.rms > 0.15:
+        candidates.extend(MOOD_ADJECTIVES["dense"])
+    elif f.rms < 0.03:
+        candidates.extend(MOOD_ADJECTIVES["thin"])
+
+    # Edge bucket (ZCR)
+    if f.zcr > 0.2:
+        candidates.extend(MOOD_ADJECTIVES["sharp"])
+    elif f.zcr < 0.05:
+        candidates.extend(MOOD_ADJECTIVES["smooth"])
+
+    # Temporal bucket
+    if f.dur_s < 0.6:
+        candidates.extend(MOOD_ADJECTIVES["short"])
+    elif f.dur_s > 3.0:
+        candidates.extend(MOOD_ADJECTIVES["long"])
+
+    # Nothing stood out → fall back to the neutral pool so we still
+    # produce *something* evocative instead of the bare tag.
+    if not candidates:
+        candidates = MOOD_ADJECTIVES["neutral"]
+
+    h = hashlib.md5(seed.encode("utf-8")).digest()
+    return candidates[h[2] % len(candidates)]
+
+
+def _heuristic_tag(path: str) -> str | None:
+    """Back-compat shim around the split feature/tag extractors. Returns
+    a bare tag (no adjective) — callers that want the richer name should
+    use :func:`_extract_features` + :func:`_heuristic_tag_from_features`
+    + :func:`_mood_adjective_from_features` directly.
+    """
+    features = _extract_features(path)
+    if features is None:
+        return None
+    return _heuristic_tag_from_features(features)
 
 
 def name_recording(
@@ -220,18 +431,31 @@ def name_recording(
     method = "heroku"
     base: str | None = None
 
+    # Pull the heuristic features up-front: they feed both the tag decision
+    # tree *and* the mood-adjective picker. Extracting once avoids loading
+    # audio twice when both paths run.
+    features = _extract_features(path)
+
     if use_clap:
         clap_result = _try_clap(path)
         if clap_result and clap_result[0][1] >= CLAP_MIN_CONFIDENCE:
             top_tag = clap_result[0][0]
             tags = [t for t, c in clap_result[:3] if c >= 0.2]
-            base = top_tag
+            # Give CLAP names a mood adjective too when features are available.
+            # `amber-kick` is more memorable than bare `kick`, and stays
+            # deterministic per file so re-runs match.
+            if features is not None:
+                adj = _mood_adjective_from_features(features, seed)
+                base = f"{adj}-{top_tag}"
+            else:
+                base = top_tag
             method = "clap"
 
-    if base is None:
-        heur = _heuristic_tag(path)
+    if base is None and features is not None:
+        heur = _heuristic_tag_from_features(features)
         if heur:
-            base = heur
+            adj = _mood_adjective_from_features(features, seed)
+            base = f"{adj}-{heur}"
             tags = [heur]
             method = "heuristic"
 
