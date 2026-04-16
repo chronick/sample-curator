@@ -237,15 +237,25 @@ fn recorder_save_to_library(
     tags: Vec<String>,
     state: State<'_, DbState>,
     recorder_state: State<'_, RecorderState>,
+    app_state: State<'_, AppState>,
 ) -> Result<RecorderSaveResult, String> {
     // Wait for writer thread to finish flushing the WAV before reading it
     recorder::audio_capture::wait_for_writer(&recorder_state, 30_000)?;
+
+    // Auto-name the recording *before* we insert it into the library so the
+    // DB path matches what's on disk. Runs the Python sidecar's
+    // `name_recording` handler (CLAP / heuristic / heroku-style), and falls
+    // back to a Rust-side heroku generator if the sidecar is unreachable.
+    let named = auto_name_recording(&path, &app_state);
+    let final_path = named.new_path.clone();
+    let extra_tags = named.tags.clone();
 
     let db_guard = state.get_db()?;
     let db = db_guard.as_ref().ok_or("Database not initialized")?;
 
     // Get audio file info for duration/channels
-    let reader = hound::WavReader::open(&path).map_err(|e| format!("Failed to read WAV: {}", e))?;
+    let reader = hound::WavReader::open(&final_path)
+        .map_err(|e| format!("Failed to read WAV: {}", e))?;
     let spec = reader.spec();
     let duration = reader.duration() as f64 / spec.sample_rate as f64;
 
@@ -262,7 +272,7 @@ fn recorder_save_to_library(
     // Insert sample into library (with pack)
     let sample_id = db
         .insert_sample(
-            &path,
+            &final_path,
             Some("recorded"),
             None,
             Some(duration),
@@ -272,8 +282,8 @@ fn recorder_save_to_library(
         )
         .map_err(|e| e.to_string())?;
 
-    // Add tags
-    for tag in &tags {
+    // Add caller-supplied tags + ML-derived tags (from CLAP/heuristic).
+    for tag in tags.iter().chain(extra_tags.iter()) {
         db.add_tag_to_sample(sample_id, tag)
             .map_err(|e| e.to_string())?;
     }
@@ -290,8 +300,9 @@ fn recorder_save_to_library(
 
     // Spawn analysis on a completely separate thread (off the Tauri thread pool).
     // Opens its own DB connection so the IPC pool stays free for UI commands.
-    let analysis_path = path.clone();
-    let analysis_tags = tags;
+    let analysis_path = final_path.clone();
+    let mut analysis_tags = tags;
+    analysis_tags.extend(extra_tags);
     std::thread::spawn(move || {
         let db_path = dirs::home_dir()
             .unwrap_or_default()
@@ -315,10 +326,63 @@ fn recorder_save_to_library(
 
     Ok(RecorderSaveResult {
         sample_id,
-        path,
+        path: final_path,
         analyzed: false, // analysis runs async in background
         pack_name,
     })
+}
+
+/// Try to run the sidecar's ``name_recording`` handler and rename the WAV
+/// in place. On any failure (sidecar missing, spawn error, bad response)
+/// falls back to the Rust-side heroku-style generator. Always returns a
+/// usable path — either the renamed one or the original unchanged.
+fn auto_name_recording(path: &str, app_state: &AppState) -> recorder::naming::AutoNameResult {
+    use recorder::naming;
+
+    // Build + send the sidecar request. If any step fails, bail to fallback.
+    let request = naming::build_sidecar_request(1, path, None, None);
+    let sidecar_response = {
+        let mut guard = match app_state.sidecar.lock() {
+            Ok(g) => g,
+            Err(_) => return naming::fallback_rename(path),
+        };
+        if guard.is_none() {
+            match SidecarManager::new() {
+                Ok(m) => *guard = Some(m),
+                Err(e) => {
+                    eprintln!("Auto-name: sidecar spawn failed ({}); using fallback", e);
+                    return naming::fallback_rename(path);
+                }
+            }
+        }
+        guard.as_mut().unwrap().call_sync(&request)
+    };
+    let response = match sidecar_response {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Auto-name: sidecar call failed ({}); using fallback", e);
+            return naming::fallback_rename(path);
+        }
+    };
+
+    let (stem, tags, method) = match naming::parse_sidecar_response(&response) {
+        Some(v) => v,
+        None => {
+            eprintln!(
+                "Auto-name: sidecar response unparseable ({}); using fallback",
+                response.chars().take(200).collect::<String>()
+            );
+            return naming::fallback_rename(path);
+        }
+    };
+    let safe_stem = naming::sanitize_stem(&stem);
+    let new_path = naming::rename_with_stem(path, &safe_stem);
+    naming::AutoNameResult {
+        new_path,
+        stem: safe_stem,
+        tags,
+        method,
+    }
 }
 
 fn main() {
