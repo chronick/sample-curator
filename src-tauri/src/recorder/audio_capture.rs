@@ -364,14 +364,45 @@ fn process_f32_samples(
 }
 
 /// Select a device and start input monitoring (always-on stream).
-pub fn select_device(device_id: &str, state: &RecorderState) -> Result<(), String> {
+///
+/// `preferred_sample_rate` (optional) lets the caller request a specific rate
+/// that will match the system output device, avoiding glitchy resampling during
+/// playback. If the device doesn't support the requested rate, we fall back to
+/// the device's native default.
+pub fn select_device(
+    device_id: &str,
+    state: &RecorderState,
+    preferred_sample_rate: Option<u32>,
+) -> Result<(), String> {
     // Stop any existing stream
     stop_monitoring(state);
 
     let device = find_device_by_id(device_id)?;
-    let supported_config = device
+    let default_config = device
         .default_input_config()
         .map_err(|e| format!("Failed to get device config: {}", e))?;
+
+    // Try to honor the requested sample rate. cpal's supported_input_configs
+    // returns a list of ranges; we pick the first one whose range includes our
+    // target and build a concrete SupportedStreamConfig at that rate. If nothing
+    // matches, fall back to the device's native default so recording still works.
+    let supported_config = preferred_sample_rate
+        .and_then(|target| {
+            device.supported_input_configs().ok().and_then(|configs| {
+                configs
+                    .filter_map(|range| {
+                        let min = range.min_sample_rate().0;
+                        let max = range.max_sample_rate().0;
+                        if min <= target && target <= max {
+                            Some(range.with_sample_rate(cpal::SampleRate(target)))
+                        } else {
+                            None
+                        }
+                    })
+                    .next()
+            })
+        })
+        .unwrap_or(default_config);
 
     let num_channels = supported_config.channels();
     let sample_rate = supported_config.sample_rate().0;
@@ -383,8 +414,8 @@ pub fn select_device(device_id: &str, state: &RecorderState) -> Result<(), Strin
     state.stream_sample_rate.store(sample_rate, Ordering::Relaxed);
 
     eprintln!(
-        "Opening device: {}ch, {}Hz, format={:?}",
-        num_channels, sample_rate, sample_format
+        "Opening device: {}ch, {}Hz, format={:?} (preferred={:?})",
+        num_channels, sample_rate, sample_format, preferred_sample_rate
     );
 
     let waveform_buffer = Arc::clone(&state.waveform_buffer);

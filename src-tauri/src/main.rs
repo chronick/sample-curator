@@ -104,8 +104,16 @@ fn recorder_list_audio_devices() -> Result<Vec<recorder::audio_capture::AudioDev
 }
 
 #[tauri::command]
-fn recorder_select_device(device_id: String, state: State<'_, RecorderState>) -> Result<(), String> {
-    recorder::audio_capture::select_device(&device_id, &state)
+fn recorder_select_device(
+    device_id: String,
+    state: State<'_, RecorderState>,
+    config_state: State<'_, RecorderConfigState>,
+) -> Result<(), String> {
+    // Pass the user's preferred sample rate from config. If the device
+    // supports it, the input stream opens at that rate — matching the system
+    // output device's rate avoids glitchy resampling during playback.
+    let preferred = config_state.get().ok().map(|c| c.sample_rate);
+    recorder::audio_capture::select_device(&device_id, &state, preferred)
 }
 
 #[tauri::command]
