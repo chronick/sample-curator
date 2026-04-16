@@ -186,7 +186,11 @@ export function useRecorder() {
       store.setElapsedTime(0);
       store.addRecording(info);
 
-      // Fire-and-forget: save + analyze in background — don't block the UI
+      // Fire-and-forget: save + analyze in background — don't block the UI.
+      // The backend auto-renames the file (CLAP / heuristic / heroku) before
+      // inserting into the library. We swap the Recent list entry in place
+      // with the post-rename path + ML tags + method so the user sees the
+      // final filename + badge as soon as save completes.
       invoke<SaveResult>("recorder_save_to_library", {
         path: info.path,
         tags: ["recorded"],
@@ -194,13 +198,26 @@ export function useRecorder() {
         .then((result) => {
           const s = useRecorderStore.getState();
           s.setLastSavedSample(result);
-          s.updateRecordingSampleId(info.path, result.sample_id);
+          s.updateRecordingAfterSave(result.original_path ?? info.path, {
+            newPath: result.path,
+            sampleId: result.sample_id,
+            namingTags: result.naming_tags ?? [],
+            namingMethod: result.naming_method ?? "unknown",
+          });
           setTimeout(() => {
             useRecorderStore.getState().setLastSavedSample(null);
           }, 3000);
         })
         .catch((e) => {
           console.warn("Recording saved locally but failed to import to library:", e);
+          // Clear the pending flag even on failure so the user can at least
+          // attempt playback (if the file happens to exist under its original
+          // name) or delete the entry manually.
+          useRecorderStore.setState((state) => ({
+            recentRecordings: state.recentRecordings.map((rec) =>
+              rec.path === info.path ? { ...rec, saving: false } : rec
+            ),
+          }));
         });
 
       return info;

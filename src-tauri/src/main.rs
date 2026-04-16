@@ -226,9 +226,20 @@ fn recorder_set_config(config: recorder::config::RecorderConfig, state: State<'_
 #[derive(serde::Serialize)]
 struct RecorderSaveResult {
     sample_id: i64,
+    /// The ORIGINAL path the frontend sent — used to match the entry in the
+    /// Recent list so it can be swapped for `renamed_path`.
+    original_path: String,
+    /// Canonical path after auto-naming (WAV was physically renamed on disk).
+    /// Equal to `original_path` if naming/rename failed.
     path: String,
     analyzed: bool,
     pack_name: Option<String>,
+    /// ML-derived tags (CLAP categories or heuristic tag). May be empty.
+    naming_tags: Vec<String>,
+    /// How the name was produced: `"clap"`, `"heuristic"`, `"heroku"`
+    /// (Python heroku fallback), or `"heroku-fallback"` (Rust-side fallback
+    /// when the sidecar itself was unreachable).
+    naming_method: String,
 }
 
 #[tauri::command]
@@ -246,9 +257,12 @@ fn recorder_save_to_library(
     // DB path matches what's on disk. Runs the Python sidecar's
     // `name_recording` handler (CLAP / heuristic / heroku-style), and falls
     // back to a Rust-side heroku generator if the sidecar is unreachable.
+    // Remember the input path so the frontend can swap the Recent list entry.
+    let original_path = path.clone();
     let named = auto_name_recording(&path, &app_state);
     let final_path = named.new_path.clone();
     let extra_tags = named.tags.clone();
+    let naming_method = named.method.clone();
 
     let db_guard = state.get_db()?;
     let db = db_guard.as_ref().ok_or("Database not initialized")?;
@@ -302,7 +316,7 @@ fn recorder_save_to_library(
     // Opens its own DB connection so the IPC pool stays free for UI commands.
     let analysis_path = final_path.clone();
     let mut analysis_tags = tags;
-    analysis_tags.extend(extra_tags);
+    analysis_tags.extend(extra_tags.iter().cloned());
     std::thread::spawn(move || {
         let db_path = dirs::home_dir()
             .unwrap_or_default()
@@ -326,9 +340,12 @@ fn recorder_save_to_library(
 
     Ok(RecorderSaveResult {
         sample_id,
+        original_path,
         path: final_path,
         analyzed: false, // analysis runs async in background
         pack_name,
+        naming_tags: extra_tags,
+        naming_method,
     })
 }
 

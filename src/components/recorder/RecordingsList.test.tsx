@@ -107,4 +107,46 @@ describe("RecordingsList", () => {
     render(<RecordingsList />);
     expect(screen.getByText("Play")).toBeInTheDocument();
   });
+
+  it("shows naming method badge when method is present", () => {
+    mockState.recentRecordings = [
+      {
+        path: "/recordings/amber-kick_20260415.wav",
+        duration_secs: 2,
+        naming_method: "clap",
+      },
+    ];
+    render(<RecordingsList />);
+    expect(screen.getByText("clap")).toBeInTheDocument();
+  });
+
+  it("omits naming badge when method is absent", () => {
+    mockState.recentRecordings = [
+      { path: "/recordings/session.wav", duration_secs: 2 },
+    ];
+    render(<RecordingsList />);
+    expect(screen.queryByText("clap")).not.toBeInTheDocument();
+    expect(screen.queryByText("heuristic")).not.toBeInTheDocument();
+    expect(screen.queryByText("heroku")).not.toBeInTheDocument();
+  });
+
+  it("shows Saving\u2026 instead of Play when entry is still saving", () => {
+    mockState.recentRecordings = [
+      { path: "/recordings/session.wav", duration_secs: 2, saving: true },
+    ];
+    mockState.expandedRecordingIndex = 0;
+    render(<RecordingsList />);
+    expect(screen.getByText("Saving\u2026")).toBeInTheDocument();
+    expect(screen.queryByText("Play")).not.toBeInTheDocument();
+  });
+
+  it("disables Play button while saving", () => {
+    mockState.recentRecordings = [
+      { path: "/recordings/session.wav", duration_secs: 2, saving: true },
+    ];
+    mockState.expandedRecordingIndex = 0;
+    render(<RecordingsList />);
+    const btn = screen.getByText("Saving\u2026");
+    expect(btn).toBeDisabled();
+  });
 });

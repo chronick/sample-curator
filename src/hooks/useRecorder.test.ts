@@ -19,9 +19,21 @@ vi.mock("../store/recorderStore", () => {
     setConfig: vi.fn(),
     addRecording: vi.fn(),
     updateRecordingSampleId: vi.fn(),
+    updateRecordingAfterSave: vi.fn(),
     setLastSavedSample: vi.fn(),
     setRecordingWaveform: vi.fn(),
-    config: { sample_rate: 48000, bit_depth: 24, channels: 2, output_dir: "", default_device: null },
+    levels: { channels: [] },
+    config: {
+      sample_rate: 48000,
+      bit_depth: 24,
+      channels: 2,
+      output_dir: "",
+      default_device: null,
+      arm_threshold_db: -40,
+      arm_silence_ms: 2000,
+    },
+    isArmed: false,
+    setIsArmed: vi.fn(),
     isRecording: false,
     isMonitoring: false,
   };
@@ -232,9 +244,12 @@ describe("useRecorder", () => {
     };
     const mockSaveResult = {
       sample_id: 42,
-      path: "/library/samples/session-001.wav",
+      original_path: "/recordings/session-001.wav",
+      path: "/library/samples/amber-kick_20260415.wav",
       analyzed: true,
       pack_name: "Recordings",
+      naming_tags: ["kick"],
+      naming_method: "clap",
     };
 
     mockInvoke.mockResolvedValueOnce(mockRecordingInfo); // recorder_stop_recording
@@ -245,7 +260,7 @@ describe("useRecorder", () => {
     (store.setElapsedTime as ReturnType<typeof vi.fn>).mockClear();
     (store.addRecording as ReturnType<typeof vi.fn>).mockClear();
     (store.setLastSavedSample as ReturnType<typeof vi.fn>).mockClear();
-    (store.updateRecordingSampleId as ReturnType<typeof vi.fn>).mockClear();
+    (store.updateRecordingAfterSave as ReturnType<typeof vi.fn>).mockClear();
 
     let info: any;
     await act(async () => {
@@ -261,7 +276,15 @@ describe("useRecorder", () => {
     expect(store.setElapsedTime).toHaveBeenCalledWith(0);
     expect(store.addRecording).toHaveBeenCalledWith(mockRecordingInfo);
     expect(store.setLastSavedSample).toHaveBeenCalledWith(mockSaveResult);
-    expect(store.updateRecordingSampleId).toHaveBeenCalledWith("/recordings/session-001.wav", 42);
+    expect(store.updateRecordingAfterSave).toHaveBeenCalledWith(
+      "/recordings/session-001.wav",
+      {
+        newPath: "/library/samples/amber-kick_20260415.wav",
+        sampleId: 42,
+        namingTags: ["kick"],
+        namingMethod: "clap",
+      }
+    );
     expect(info).toEqual(mockRecordingInfo);
   });
 
@@ -375,7 +398,15 @@ describe("useRecorder", () => {
       channels: 2,
       bit_depth: 24,
     };
-    const mockSaveResult = { sample_id: 99, path: "/library/samples/session-003.wav", analyzed: true, pack_name: "Recordings" };
+    const mockSaveResult = {
+      sample_id: 99,
+      original_path: "/recordings/session-003.wav",
+      path: "/library/samples/wisp-loop_20260415.wav",
+      analyzed: true,
+      pack_name: "Recordings",
+      naming_tags: [],
+      naming_method: "heuristic",
+    };
 
     mockInvoke.mockResolvedValueOnce(mockRecordingInfo);
     mockInvoke.mockResolvedValueOnce(mockSaveResult);

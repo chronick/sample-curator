@@ -41,6 +41,21 @@ interface RecorderStore {
   recentRecordings: RecordingEntry[];
   addRecording: (recording: RecordingInfo) => void;
   updateRecordingSampleId: (path: string, sampleId: number) => void;
+  /**
+   * Replace a pending recording's metadata after `recorder_save_to_library`
+   * returns. Matches by `originalPath`, swaps in the post-rename path,
+   * sample_id, ML tags, and naming method. Called from useRecorder's save
+   * callback so the Recent list reflects the real filename + tags live.
+   */
+  updateRecordingAfterSave: (
+    originalPath: string,
+    patch: {
+      newPath: string;
+      sampleId: number;
+      namingTags: string[];
+      namingMethod: string;
+    }
+  ) => void;
 
   // Expanded recording
   expandedRecordingIndex: number | null;
@@ -104,12 +119,33 @@ export const useRecorderStore = create<RecorderStore>((set) => ({
   recentRecordings: [],
   addRecording: (recording) =>
     set((state) => ({
-      recentRecordings: [recording, ...state.recentRecordings].slice(0, 20),
+      // Mark the entry as `saving: true` — the backend will rename the file
+      // and insert into the library asynchronously. updateRecordingAfterSave
+      // (or the catch path) clears this flag once the IPC completes.
+      recentRecordings: [
+        { ...recording, saving: true },
+        ...state.recentRecordings,
+      ].slice(0, 20),
     })),
   updateRecordingSampleId: (path, sampleId) =>
     set((state) => ({
       recentRecordings: state.recentRecordings.map((rec) =>
         rec.path === path ? { ...rec, sample_id: sampleId } : rec
+      ),
+    })),
+  updateRecordingAfterSave: (originalPath, patch) =>
+    set((state) => ({
+      recentRecordings: state.recentRecordings.map((rec) =>
+        rec.path === originalPath
+          ? {
+              ...rec,
+              path: patch.newPath,
+              sample_id: patch.sampleId,
+              naming_tags: patch.namingTags,
+              naming_method: patch.namingMethod,
+              saving: false,
+            }
+          : rec
       ),
     })),
 
