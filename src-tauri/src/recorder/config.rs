@@ -9,6 +9,24 @@ pub struct RecorderConfig {
     pub channels: u16,
     pub output_dir: String,
     pub default_device: Option<String>,
+
+    /// Peak level (in dBFS) above which arm mode triggers recording.
+    /// Defaults to -40 dBFS — below most room tone, above typical noise floor.
+    #[serde(default = "default_arm_threshold_db")]
+    pub arm_threshold_db: f32,
+
+    /// Duration of continuous silence (below threshold) before arm mode
+    /// auto-stops the recording. Defaults to 2000 ms.
+    #[serde(default = "default_arm_silence_ms")]
+    pub arm_silence_ms: u32,
+}
+
+fn default_arm_threshold_db() -> f32 {
+    -40.0
+}
+
+fn default_arm_silence_ms() -> u32 {
+    2000
 }
 
 impl Default for RecorderConfig {
@@ -25,6 +43,8 @@ impl Default for RecorderConfig {
             channels: 2,
             output_dir,
             default_device: None,
+            arm_threshold_db: default_arm_threshold_db(),
+            arm_silence_ms: default_arm_silence_ms(),
         }
     }
 }
@@ -90,6 +110,8 @@ mod tests {
         assert_eq!(config.channels, 2);
         assert!(config.output_dir.contains("recordings"));
         assert!(config.default_device.is_none());
+        assert_eq!(config.arm_threshold_db, -40.0);
+        assert_eq!(config.arm_silence_ms, 2000);
     }
 
     #[test]
@@ -100,6 +122,8 @@ mod tests {
             channels: 1,
             output_dir: "/tmp/test".to_string(),
             default_device: Some("TestDevice".to_string()),
+            arm_threshold_db: -32.5,
+            arm_silence_ms: 1500,
         };
         let json = serde_json::to_string(&config).unwrap();
         let parsed: RecorderConfig = serde_json::from_str(&json).unwrap();
@@ -108,6 +132,23 @@ mod tests {
         assert_eq!(parsed.channels, 1);
         assert_eq!(parsed.output_dir, "/tmp/test");
         assert_eq!(parsed.default_device.as_deref(), Some("TestDevice"));
+        assert_eq!(parsed.arm_threshold_db, -32.5);
+        assert_eq!(parsed.arm_silence_ms, 1500);
+    }
+
+    #[test]
+    fn test_config_backfills_arm_defaults_for_old_configs() {
+        // Old config JSON without arm_* fields should load with defaults.
+        let old_json = r#"{
+            "sample_rate": 48000,
+            "bit_depth": 24,
+            "channels": 2,
+            "output_dir": "/tmp",
+            "default_device": null
+        }"#;
+        let parsed: RecorderConfig = serde_json::from_str(old_json).unwrap();
+        assert_eq!(parsed.arm_threshold_db, -40.0);
+        assert_eq!(parsed.arm_silence_ms, 2000);
     }
 
     #[test]

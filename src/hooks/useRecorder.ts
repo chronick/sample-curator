@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useRecorderStore } from "../store/recorderStore";
+import { useArmMode } from "./useArmMode";
 import type { AudioDevice, RecordingInfo, RecorderConfig, RecordingWaveformData, SaveResult } from "../types/recorder";
 
 export function useRecorder() {
@@ -216,6 +217,10 @@ export function useRecorder() {
       console.error("Failed to open recordings directory:", e);
     }
   }, []);
+
+  // Arm-mode state machine: watches polled levels and drives start/stop.
+  // Safe to wire unconditionally — it no-ops unless the user arms recording.
+  useArmMode({ startRecording, stopRecording });
 
   return {
     selectDevice,

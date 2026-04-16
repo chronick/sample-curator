@@ -10,13 +10,14 @@ vi.mock("./LevelMeter", () => ({ LevelMeter: () => <div data-testid="level-meter
 vi.mock("./RecordButton", () => ({ RecordButton: () => <div data-testid="record-button" /> }));
 vi.mock("./RecordingsList", () => ({ RecordingsList: () => <div data-testid="recordings-list" /> }));
 vi.mock("./RecorderSettingsDialog", () => ({ RecorderSettingsDialog: () => <div data-testid="settings-dialog" /> }));
+vi.mock("./ArmControls", () => ({ ArmControls: () => <div data-testid="arm-controls" /> }));
 
 const mockSetSettingsOpen = vi.fn();
 const mockOpenRecordingsDir = vi.fn();
 
 const mockState: Record<string, any> = {
   setSettingsOpen: mockSetSettingsOpen,
-  config: { sample_rate: 48000, bit_depth: 24, channels: 2, output_dir: "", default_device: null },
+  config: { sample_rate: 48000, bit_depth: 24, channels: 2, output_dir: "", default_device: null, arm_threshold_db: -40, arm_silence_ms: 2000 },
   lastSavedSample: null,
 };
 
@@ -48,7 +49,15 @@ describe("RecorderPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockState.lastSavedSample = null;
-    mockState.config = { sample_rate: 48000, bit_depth: 24, channels: 2, output_dir: "", default_device: null };
+    mockState.config = {
+      sample_rate: 48000,
+      bit_depth: 24,
+      channels: 2,
+      output_dir: "",
+      default_device: null,
+      arm_threshold_db: -40,
+      arm_silence_ms: 2000,
+    };
   });
 
   it("renders all sub-components", () => {
@@ -61,6 +70,7 @@ describe("RecorderPanel", () => {
     expect(screen.getByTestId("record-button")).toBeInTheDocument();
     expect(screen.getByTestId("recordings-list")).toBeInTheDocument();
     expect(screen.getByTestId("settings-dialog")).toBeInTheDocument();
+    expect(screen.getByTestId("arm-controls")).toBeInTheDocument();
   });
 
   it("shows Settings button and click calls setSettingsOpen(true)", () => {
@@ -85,7 +95,7 @@ describe("RecorderPanel", () => {
   });
 
   it("shows 44.1kHz format for 44100 sample rate", () => {
-    mockState.config = { sample_rate: 44100, bit_depth: 16, channels: 1, output_dir: "", default_device: null };
+    mockState.config = { sample_rate: 44100, bit_depth: 16, channels: 1, output_dir: "", default_device: null, arm_threshold_db: -40, arm_silence_ms: 2000 };
     render(<RecorderPanel />);
     expect(screen.getByText(/44\.1kHz/)).toBeInTheDocument();
     expect(screen.getByText(/Mono/)).toBeInTheDocument();

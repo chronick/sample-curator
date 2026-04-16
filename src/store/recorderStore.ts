@@ -57,6 +57,10 @@ interface RecorderStore {
   // Settings dialog
   settingsOpen: boolean;
   setSettingsOpen: (open: boolean) => void;
+
+  // Arm mode (ephemeral — not persisted; threshold/silence live in config)
+  isArmed: boolean;
+  setIsArmed: (armed: boolean) => void;
 }
 
 export const useRecorderStore = create<RecorderStore>((set) => ({
@@ -73,6 +77,8 @@ export const useRecorderStore = create<RecorderStore>((set) => ({
     channels: 2,
     output_dir: "",
     default_device: null,
+    arm_threshold_db: -40,
+    arm_silence_ms: 2000,
   },
   setConfig: (config) => set({ config }),
   updateConfig: (partial) =>
@@ -122,4 +128,8 @@ export const useRecorderStore = create<RecorderStore>((set) => ({
   // Settings
   settingsOpen: false,
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
+
+  // Arm mode
+  isArmed: false,
+  setIsArmed: (isArmed) => set({ isArmed }),
 }));

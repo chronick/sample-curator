@@ -38,7 +38,10 @@ describe('useRecorderStore', () => {
         channels: 2,
         output_dir: '',
         default_device: null,
+        arm_threshold_db: -40,
+        arm_silence_ms: 2000,
       },
+      isArmed: false,
       isRecording: false,
       isMonitoring: false,
       elapsedTime: 0,
@@ -106,6 +109,8 @@ describe('useRecorderStore', () => {
       channels: 1,
       output_dir: '/output',
       default_device: 'usb-1',
+      arm_threshold_db: -30,
+      arm_silence_ms: 1500,
     };
     useRecorderStore.getState().setConfig(newConfig);
 

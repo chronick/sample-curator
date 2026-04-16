@@ -6,6 +6,7 @@ import { LevelMeter } from "./LevelMeter";
 import { RecordButton } from "./RecordButton";
 import { RecordingsList } from "./RecordingsList";
 import { RecorderSettingsDialog } from "./RecorderSettingsDialog";
+import { ArmControls } from "./ArmControls";
 import { useRecorderStore } from "../../store/recorderStore";
 import { useRecorder } from "../../hooks/useRecorder";
 import { useStore } from "../../store";
@@ -28,6 +29,12 @@ export function RecorderPanel() {
   const formatRate = (rate: number) =>
     rate === 44100 ? "44.1kHz" : `${rate / 1000}kHz`;
 
+  const formatChannels = (n: number) => {
+    if (n === 1) return "Mono";
+    if (n === 2) return "Stereo";
+    return `${n}ch`;
+  };
+
   return (
     <div className="h-full flex flex-col bg-surface text-white">
       {/* Config bar */}
@@ -37,7 +44,7 @@ export function RecorderPanel() {
           <ConfigBar />
           <span className="text-xs text-gray-500">
             {formatRate(config.sample_rate)} · {config.bit_depth}-bit ·{" "}
-            {config.channels === 1 ? "Mono" : "Stereo"}
+            {formatChannels(config.channels)}
           </span>
           <button
             onClick={() => setSettingsOpen(true)}
@@ -47,6 +54,9 @@ export function RecorderPanel() {
           </button>
         </div>
       </div>
+
+      {/* Arm-mode controls */}
+      <ArmControls />
 
       {/* Auto-import notification */}
       {lastSaved && (

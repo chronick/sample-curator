@@ -44,6 +44,10 @@ export interface RecorderConfig {
   channels: number;
   output_dir: string;
   default_device: string | null;
+  /** Peak dBFS threshold above which arm mode starts recording. */
+  arm_threshold_db: number;
+  /** Duration of continuous silence (below threshold) before arm mode auto-stops. */
+  arm_silence_ms: number;
 }
 
 export interface SaveResult {
