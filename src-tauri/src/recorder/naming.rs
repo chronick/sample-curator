@@ -18,9 +18,17 @@ pub struct AutoNameResult {
     pub new_path: String,
     pub stem: String,
     pub tags: Vec<String>,
-    /// One of `"clap"`, `"heuristic"`, `"heroku"`, `"heroku-fallback"`
-    /// (the last indicating the sidecar was unavailable).
+    /// One of `"clap"`, `"transcription"`, `"llm"`, `"heuristic"`, `"heroku"`,
+    /// or `"heroku-fallback"` (the last indicating the sidecar was unavailable).
     pub method: String,
+    /// When A/B test mode is on and both the mechanical-transcript and the
+    /// LLM-refined paths produced usable stems, this holds whichever was NOT
+    /// selected as the primary. UI uses it to show both to the user for
+    /// comparison.
+    pub alternative: Option<String>,
+    /// Method tag for the `alternative` stem (e.g. `"transcription"` when
+    /// `method == "llm"`). None when there's no alternative.
+    pub alternative_method: Option<String>,
 }
 
 /// Short, evocative word list for the Rust-side fallback. Kept intentionally
@@ -140,7 +148,13 @@ fn extract_timestamp_suffix(stem: &str) -> Option<String> {
 }
 
 /// Build the JSON-RPC request body for `name_recording`.
-pub fn build_sidecar_request(id: u64, path: &str, bpm: Option<f64>, key: Option<&str>) -> String {
+pub fn build_sidecar_request(
+    id: u64,
+    path: &str,
+    bpm: Option<f64>,
+    key: Option<&str>,
+    ab_test: bool,
+) -> String {
     // Hand-rolled JSON to avoid extra serde dependency footprint here and
     // because the payload is simple/fixed-shape.
     let mut params = format!("\"path\":{}", json_string(path));
@@ -153,6 +167,9 @@ pub fn build_sidecar_request(id: u64, path: &str, bpm: Option<f64>, key: Option<
         if !k.is_empty() {
             params.push_str(&format!(",\"key\":{}", json_string(k)));
         }
+    }
+    if ab_test {
+        params.push_str(",\"ab_test\":true");
     }
     format!(
         "{{\"jsonrpc\":\"2.0\",\"method\":\"name_recording\",\"params\":{{{}}},\"id\":{}}}",
@@ -178,9 +195,18 @@ fn json_string(s: &str) -> String {
     out
 }
 
-/// Parse the sidecar response and return an ``AutoNameResult`` on success.
+/// Parsed fields from a successful `name_recording` sidecar response.
+pub struct SidecarNamingFields {
+    pub stem: String,
+    pub tags: Vec<String>,
+    pub method: String,
+    pub alternative: Option<String>,
+    pub alternative_method: Option<String>,
+}
+
+/// Parse the sidecar response and return its fields on success.
 /// Returns `None` on any parse error so the caller can fall back cleanly.
-pub fn parse_sidecar_response(response: &str) -> Option<(String, Vec<String>, String)> {
+pub fn parse_sidecar_response(response: &str) -> Option<SidecarNamingFields> {
     let v: serde_json::Value = serde_json::from_str(response).ok()?;
     let result = v.get("result")?;
     let stem = result.get("stem")?.as_str()?.to_string();
@@ -198,7 +224,21 @@ pub fn parse_sidecar_response(response: &str) -> Option<(String, Vec<String>, St
                 .collect()
         })
         .unwrap_or_default();
-    Some((stem, tags, method))
+    let alternative = result
+        .get("alternative")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let alternative_method = result
+        .get("alternative_method")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    Some(SidecarNamingFields {
+        stem,
+        tags,
+        method,
+        alternative,
+        alternative_method,
+    })
 }
 
 /// Sanitize a stem so it's safe as a filename on macOS/Linux/Windows.
@@ -239,6 +279,8 @@ pub fn fallback_rename(path: &str) -> AutoNameResult {
         stem,
         tags: vec![],
         method: "heroku-fallback".to_string(),
+        alternative: None,
+        alternative_method: None,
     }
 }
 
@@ -327,28 +369,48 @@ mod tests {
 
     #[test]
     fn build_sidecar_request_with_bpm_and_key() {
-        let req = build_sidecar_request(7, "/tmp/x.wav", Some(128.0), Some("Am"));
+        let req = build_sidecar_request(7, "/tmp/x.wav", Some(128.0), Some("Am"), false);
         assert!(req.contains("\"method\":\"name_recording\""));
         assert!(req.contains("\"path\":\"/tmp/x.wav\""));
         assert!(req.contains("\"bpm\":128"));
         assert!(req.contains("\"key\":\"Am\""));
         assert!(req.contains("\"id\":7"));
+        assert!(!req.contains("ab_test"));
     }
 
     #[test]
     fn build_sidecar_request_omits_missing_fields() {
-        let req = build_sidecar_request(1, "/tmp/x.wav", None, None);
+        let req = build_sidecar_request(1, "/tmp/x.wav", None, None, false);
         assert!(!req.contains("bpm"));
         assert!(!req.contains("key"));
+        assert!(!req.contains("ab_test"));
+    }
+
+    #[test]
+    fn build_sidecar_request_includes_ab_test_when_enabled() {
+        let req = build_sidecar_request(2, "/tmp/x.wav", None, None, true);
+        assert!(req.contains("\"ab_test\":true"));
     }
 
     #[test]
     fn parse_sidecar_response_happy_path() {
         let resp = r#"{"jsonrpc":"2.0","result":{"stem":"dark-kick_128bpm_Am","tags":["kick"],"method":"clap"},"id":1}"#;
         let parsed = parse_sidecar_response(resp).expect("should parse");
-        assert_eq!(parsed.0, "dark-kick_128bpm_Am");
-        assert_eq!(parsed.1, vec!["kick".to_string()]);
-        assert_eq!(parsed.2, "clap");
+        assert_eq!(parsed.stem, "dark-kick_128bpm_Am");
+        assert_eq!(parsed.tags, vec!["kick".to_string()]);
+        assert_eq!(parsed.method, "clap");
+        assert!(parsed.alternative.is_none());
+        assert!(parsed.alternative_method.is_none());
+    }
+
+    #[test]
+    fn parse_sidecar_response_with_ab_alternative() {
+        let resp = r#"{"jsonrpc":"2.0","result":{"stem":"eternal-wave-chant","tags":["vocal"],"method":"llm","alternative":"ride-eternal-wave","alternative_method":"transcription"},"id":1}"#;
+        let parsed = parse_sidecar_response(resp).expect("should parse");
+        assert_eq!(parsed.stem, "eternal-wave-chant");
+        assert_eq!(parsed.method, "llm");
+        assert_eq!(parsed.alternative.as_deref(), Some("ride-eternal-wave"));
+        assert_eq!(parsed.alternative_method.as_deref(), Some("transcription"));
     }
 
     #[test]

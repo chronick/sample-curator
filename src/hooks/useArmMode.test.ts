@@ -31,6 +31,7 @@ describe("useArmMode", () => {
         default_device: null,
         arm_threshold_db: -40,
         arm_silence_ms: 2000,
+        llm_ab_test: false,
       },
     });
     vi.useFakeTimers({ shouldAdvanceTime: false });

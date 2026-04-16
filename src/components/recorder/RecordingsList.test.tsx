@@ -149,4 +149,45 @@ describe("RecordingsList", () => {
     const btn = screen.getByText("Saving\u2026");
     expect(btn).toBeDisabled();
   });
+
+  it("renders LLM naming badge for llm method", () => {
+    mockState.recentRecordings = [
+      {
+        path: "/recordings/eternal-wave.wav",
+        duration_secs: 3,
+        naming_method: "llm",
+      },
+    ];
+    render(<RecordingsList />);
+    expect(screen.getByText("llm")).toBeInTheDocument();
+  });
+
+  it("shows A/B alternative stem + method badge when present", () => {
+    mockState.recentRecordings = [
+      {
+        path: "/recordings/eternal-wave-chant.wav",
+        duration_secs: 3,
+        naming_method: "llm",
+        naming_alternative: "ride-eternal-wave",
+        naming_alternative_method: "transcription",
+      },
+    ];
+    render(<RecordingsList />);
+    const alt = screen.getByTestId("naming-alternative");
+    expect(alt).toBeInTheDocument();
+    expect(alt).toHaveTextContent("ride-eternal-wave");
+    expect(alt).toHaveTextContent("transcription");
+  });
+
+  it("omits A/B alternative when not present", () => {
+    mockState.recentRecordings = [
+      {
+        path: "/recordings/wisp-loop.wav",
+        duration_secs: 3,
+        naming_method: "heuristic",
+      },
+    ];
+    render(<RecordingsList />);
+    expect(screen.queryByTestId("naming-alternative")).not.toBeInTheDocument();
+  });
 });

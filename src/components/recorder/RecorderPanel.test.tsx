@@ -17,7 +17,7 @@ const mockOpenRecordingsDir = vi.fn();
 
 const mockState: Record<string, any> = {
   setSettingsOpen: mockSetSettingsOpen,
-  config: { sample_rate: 48000, bit_depth: 24, channels: 2, output_dir: "", default_device: null, arm_threshold_db: -40, arm_silence_ms: 2000 },
+  config: { sample_rate: 48000, bit_depth: 24, channels: 2, output_dir: "", default_device: null, arm_threshold_db: -40, arm_silence_ms: 2000, llm_ab_test: false },
   lastSavedSample: null,
 };
 
@@ -57,6 +57,7 @@ describe("RecorderPanel", () => {
       default_device: null,
       arm_threshold_db: -40,
       arm_silence_ms: 2000,
+      llm_ab_test: false,
     };
   });
 
@@ -95,7 +96,7 @@ describe("RecorderPanel", () => {
   });
 
   it("shows 44.1kHz format for 44100 sample rate", () => {
-    mockState.config = { sample_rate: 44100, bit_depth: 16, channels: 1, output_dir: "", default_device: null, arm_threshold_db: -40, arm_silence_ms: 2000 };
+    mockState.config = { sample_rate: 44100, bit_depth: 16, channels: 1, output_dir: "", default_device: null, arm_threshold_db: -40, arm_silence_ms: 2000, llm_ab_test: false };
     render(<RecorderPanel />);
     expect(screen.getByText(/44\.1kHz/)).toBeInTheDocument();
     expect(screen.getByText(/Mono/)).toBeInTheDocument();

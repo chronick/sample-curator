@@ -19,6 +19,7 @@ const baseState = () => ({
     default_device: null,
     arm_threshold_db: -40,
     arm_silence_ms: 2000,
+    llm_ab_test: false,
   },
   updateConfig: mockUpdateConfig,
 });
@@ -94,6 +95,33 @@ describe("ArmControls", () => {
       "recorder_set_config",
       expect.objectContaining({
         config: expect.objectContaining({ arm_silence_ms: 1500 }),
+      })
+    );
+  });
+
+  it("renders the LLM A/B toggle reflecting current config", () => {
+    render(<ArmControls />);
+    const toggle = screen.getByLabelText(/LLM A\/B test mode/i) as HTMLInputElement;
+    expect(toggle).toBeInTheDocument();
+    expect(toggle.checked).toBe(false);
+  });
+
+  it("shows LLM A/B toggle as checked when config has it enabled", () => {
+    mockState.config.llm_ab_test = true;
+    render(<ArmControls />);
+    const toggle = screen.getByLabelText(/LLM A\/B test mode/i) as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+  });
+
+  it("persists LLM A/B toggle state to store and backend", () => {
+    render(<ArmControls />);
+    const toggle = screen.getByLabelText(/LLM A\/B test mode/i);
+    fireEvent.click(toggle);
+    expect(mockUpdateConfig).toHaveBeenCalledWith({ llm_ab_test: true });
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "recorder_set_config",
+      expect.objectContaining({
+        config: expect.objectContaining({ llm_ab_test: true }),
       })
     );
   });

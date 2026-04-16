@@ -19,6 +19,15 @@ pub struct RecorderConfig {
     /// auto-stops the recording. Defaults to 2000 ms.
     #[serde(default = "default_arm_silence_ms")]
     pub arm_silence_ms: u32,
+
+    /// When true, vocal samples trigger both the mechanical-transcript naming
+    /// path (Whisper → first content words) and the LLM-refinement path
+    /// (ollama). Whichever path becomes the primary name, the other is
+    /// returned as an alternative so the UI can show both for comparison.
+    /// Default false (LLM is still used as the primary when available; A/B
+    /// mode is a deliberate opt-in for auditing naming quality).
+    #[serde(default)]
+    pub llm_ab_test: bool,
 }
 
 fn default_arm_threshold_db() -> f32 {
@@ -45,6 +54,7 @@ impl Default for RecorderConfig {
             default_device: None,
             arm_threshold_db: default_arm_threshold_db(),
             arm_silence_ms: default_arm_silence_ms(),
+            llm_ab_test: false,
         }
     }
 }
@@ -112,6 +122,7 @@ mod tests {
         assert!(config.default_device.is_none());
         assert_eq!(config.arm_threshold_db, -40.0);
         assert_eq!(config.arm_silence_ms, 2000);
+        assert!(!config.llm_ab_test);
     }
 
     #[test]
@@ -124,6 +135,7 @@ mod tests {
             default_device: Some("TestDevice".to_string()),
             arm_threshold_db: -32.5,
             arm_silence_ms: 1500,
+            llm_ab_test: true,
         };
         let json = serde_json::to_string(&config).unwrap();
         let parsed: RecorderConfig = serde_json::from_str(&json).unwrap();
@@ -134,11 +146,12 @@ mod tests {
         assert_eq!(parsed.default_device.as_deref(), Some("TestDevice"));
         assert_eq!(parsed.arm_threshold_db, -32.5);
         assert_eq!(parsed.arm_silence_ms, 1500);
+        assert!(parsed.llm_ab_test);
     }
 
     #[test]
     fn test_config_backfills_arm_defaults_for_old_configs() {
-        // Old config JSON without arm_* fields should load with defaults.
+        // Old config JSON without arm_* / llm_ab_test fields should load with defaults.
         let old_json = r#"{
             "sample_rate": 48000,
             "bit_depth": 24,
@@ -149,6 +162,7 @@ mod tests {
         let parsed: RecorderConfig = serde_json::from_str(old_json).unwrap();
         assert_eq!(parsed.arm_threshold_db, -40.0);
         assert_eq!(parsed.arm_silence_ms, 2000);
+        assert!(!parsed.llm_ab_test);
     }
 
     #[test]

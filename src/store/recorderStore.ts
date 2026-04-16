@@ -54,6 +54,8 @@ interface RecorderStore {
       sampleId: number;
       namingTags: string[];
       namingMethod: string;
+      namingAlternative?: string;
+      namingAlternativeMethod?: string;
     }
   ) => void;
 
@@ -94,6 +96,7 @@ export const useRecorderStore = create<RecorderStore>((set) => ({
     default_device: null,
     arm_threshold_db: -40,
     arm_silence_ms: 2000,
+    llm_ab_test: false,
   },
   setConfig: (config) => set({ config }),
   updateConfig: (partial) =>
@@ -143,6 +146,8 @@ export const useRecorderStore = create<RecorderStore>((set) => ({
               sample_id: patch.sampleId,
               naming_tags: patch.namingTags,
               naming_method: patch.namingMethod,
+              naming_alternative: patch.namingAlternative,
+              naming_alternative_method: patch.namingAlternativeMethod,
               saving: false,
             }
           : rec

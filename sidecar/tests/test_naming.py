@@ -293,17 +293,16 @@ class TestTranscription:
     def test_name_recording_uses_transcription_when_speech_detected(self, tmp_path):
         p = tmp_path / "session_20260415_183012.wav"
         _write_wav(p, duration_s=1.0, freq=440.0)
-        # Force the features check to think this is speech
+        # Force speech detection + stub transcript. LLM off so we fall to the
+        # mechanical stem path. Also stub ollama's refinement to None so the
+        # LLM path can't win.
         with patch.object(naming, "_looks_like_speech", return_value=True):
-            with patch.object(
-                naming,
-                "_transcribe_to_stem",
-                return_value="testing-microphone",
-            ):
-                result = naming.name_recording(str(p), use_clap=False)
-                assert result["method"] == "transcription"
-                assert result["stem"] == "testing-microphone"
-                assert "vocal" in result["tags"]
+            with patch.object(naming, "_transcribe", return_value="testing the microphone"):
+                with patch.object(naming, "_refine_transcript_with_llm", return_value=None):
+                    result = naming.name_recording(str(p), use_clap=False)
+                    assert result["method"] == "transcription"
+                    assert result["stem"].startswith("testing-microphone")
+                    assert "vocal" in result["tags"]
 
     def test_name_recording_uses_transcription_when_clap_says_vocal(self, tmp_path):
         p = tmp_path / "session_20260415_183012.wav"
@@ -313,25 +312,137 @@ class TestTranscription:
             "_try_clap",
             return_value=[("vocal", 0.9), ("voice", 0.3)],
         ):
-            with patch.object(
-                naming,
-                "_transcribe_to_stem",
-                return_value="hello-world",
-            ):
-                result = naming.name_recording(str(p), use_clap=True)
-                assert result["method"] == "transcription"
-                assert result["stem"] == "hello-world"
-                # CLAP vocal tags preserved
-                assert "vocal" in result["tags"]
+            with patch.object(naming, "_transcribe", return_value="hello world from me"):
+                with patch.object(naming, "_refine_transcript_with_llm", return_value=None):
+                    result = naming.name_recording(str(p), use_clap=True)
+                    assert result["method"] == "transcription"
+                    assert result["stem"].startswith("hello-world")
+                    # CLAP vocal tags preserved
+                    assert "vocal" in result["tags"]
 
     def test_name_recording_falls_back_to_heuristic_when_transcription_empty(self, tmp_path):
         p = tmp_path / "session_20260415_183012.wav"
         _write_wav(p, duration_s=1.0, freq=440.0)
         with patch.object(naming, "_looks_like_speech", return_value=True):
-            with patch.object(naming, "_transcribe_to_stem", return_value=None):
+            with patch.object(naming, "_transcribe", return_value=None):
                 result = naming.name_recording(str(p), use_clap=False)
                 # Transcription declined → heuristic or heroku, not transcription
                 assert result["method"] != "transcription"
+                assert result["method"] != "llm"
+
+
+class TestLLMRefinement:
+    def test_sanitize_llm_stem_strips_wrappers(self):
+        # Quotes, backticks, asterisks should vanish
+        assert naming._sanitize_llm_stem('"eternal-wave-chant"') == "eternal-wave-chant"
+        assert naming._sanitize_llm_stem("`hello world`") == "hello-world"
+        assert naming._sanitize_llm_stem("**Cool Name**") == "cool-name"
+
+    def test_sanitize_llm_stem_collapses_spaces_and_hyphens(self):
+        assert naming._sanitize_llm_stem("eternal  wave  chant") == "eternal-wave-chant"
+        assert naming._sanitize_llm_stem("eternal--wave---chant") == "eternal-wave-chant"
+
+    def test_sanitize_llm_stem_only_takes_first_line(self):
+        # LLMs sometimes add explanations on subsequent lines
+        raw = "eternal-wave\nThis name captures..."
+        assert naming._sanitize_llm_stem(raw) == "eternal-wave"
+
+    def test_sanitize_llm_stem_strips_non_ascii_and_punctuation(self):
+        assert naming._sanitize_llm_stem("hello! (world) 你好") == "hello-world"
+
+    def test_refine_returns_none_without_ollama(self):
+        # When the ollama module is absent the function must return None
+        # cleanly so callers fall through to the mechanical stem.
+        with patch.dict("sys.modules", {"ollama": None}):
+            assert naming._refine_transcript_with_llm("some transcript") is None
+
+    def test_refine_returns_none_on_empty_transcript(self):
+        assert naming._refine_transcript_with_llm("") is None
+        assert naming._refine_transcript_with_llm("   ") is None
+
+    def test_refine_returns_sanitized_llm_output(self):
+        fake_ollama = type("M", (), {})()
+
+        def fake_chat(**kwargs):
+            return {"message": {"content": '"eternal-wave-chant"'}}
+
+        fake_ollama.chat = fake_chat
+        with patch.dict("sys.modules", {"ollama": fake_ollama}):
+            result = naming._refine_transcript_with_llm("we ride the eternal wave")
+            assert result == "eternal-wave-chant"
+
+    def test_refine_returns_none_on_ollama_exception(self):
+        fake_ollama = type("M", (), {})()
+
+        def fake_chat(**kwargs):
+            raise ConnectionError("daemon not running")
+
+        fake_ollama.chat = fake_chat
+        with patch.dict("sys.modules", {"ollama": fake_ollama}):
+            assert naming._refine_transcript_with_llm("hello") is None
+
+    def test_refine_rejects_too_short_stem(self):
+        fake_ollama = type("M", (), {})()
+        fake_ollama.chat = lambda **kw: {"message": {"content": "a"}}
+        with patch.dict("sys.modules", {"ollama": fake_ollama}):
+            assert naming._refine_transcript_with_llm("hi") is None
+
+    def test_refine_rejects_too_long_stem(self):
+        fake_ollama = type("M", (), {})()
+        fake_ollama.chat = lambda **kw: {"message": {"content": "a" * 100}}
+        with patch.dict("sys.modules", {"ollama": fake_ollama}):
+            assert naming._refine_transcript_with_llm("hi") is None
+
+    def test_name_recording_prefers_llm_over_mechanical_stem(self, tmp_path):
+        p = tmp_path / "session_20260415_183012.wav"
+        _write_wav(p, duration_s=1.0, freq=440.0)
+        with patch.object(naming, "_looks_like_speech", return_value=True):
+            with patch.object(naming, "_transcribe", return_value="we ride the eternal wave"):
+                with patch.object(
+                    naming, "_refine_transcript_with_llm", return_value="eternal-wave-chant"
+                ):
+                    result = naming.name_recording(str(p), use_clap=False)
+                    assert result["method"] == "llm"
+                    assert result["stem"].startswith("eternal-wave-chant")
+
+    def test_name_recording_ab_test_returns_alternative_stem(self, tmp_path):
+        p = tmp_path / "session_20260415_183012.wav"
+        _write_wav(p, duration_s=1.0, freq=440.0)
+        with patch.object(naming, "_looks_like_speech", return_value=True):
+            with patch.object(naming, "_transcribe", return_value="we ride the eternal wave"):
+                with patch.object(
+                    naming, "_refine_transcript_with_llm", return_value="eternal-wave-chant"
+                ):
+                    result = naming.name_recording(str(p), use_clap=False, ab_test=True)
+                    assert result["method"] == "llm"
+                    # Mechanical stem appears as the alternative
+                    assert "alternative" in result
+                    assert result["alternative_method"] == "transcription"
+                    # The mechanical stem should be the first 3 content words
+                    assert "ride" in result["alternative"]
+
+    def test_name_recording_ab_test_omits_alternative_when_paths_agree(self, tmp_path):
+        p = tmp_path / "session_20260415_183012.wav"
+        _write_wav(p, duration_s=1.0, freq=440.0)
+        # When LLM produces the SAME stem as mechanical, alternative shouldn't
+        # be surfaced (nothing to compare).
+        with patch.object(naming, "_looks_like_speech", return_value=True):
+            with patch.object(naming, "_transcribe", return_value="ride eternal wave"):
+                with patch.object(
+                    naming, "_refine_transcript_with_llm", return_value="ride-eternal-wave"
+                ):
+                    result = naming.name_recording(str(p), use_clap=False, ab_test=True)
+                    # LLM stem wins as primary, but alternative is same → omitted
+                    assert "alternative" not in result
+
+    def test_name_recording_skips_llm_when_use_llm_false(self, tmp_path):
+        p = tmp_path / "session_20260415_183012.wav"
+        _write_wav(p, duration_s=1.0, freq=440.0)
+        with patch.object(naming, "_looks_like_speech", return_value=True):
+            with patch.object(naming, "_transcribe", return_value="hello world"):
+                with patch.object(naming, "_refine_transcript_with_llm") as mock_llm:
+                    naming.name_recording(str(p), use_clap=False, use_llm=False)
+                    mock_llm.assert_not_called()
 
 
 class TestHandlerRegistration:

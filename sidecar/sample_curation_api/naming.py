@@ -454,40 +454,140 @@ def _get_whisper_model():
     return _WHISPER_MODEL
 
 
-def _transcribe_to_stem(path: str, max_words: int = 3) -> str | None:
-    """Transcribe the clip via Whisper and extract up to `max_words` content
-    words as a hyphenated filename stem. Returns ``None`` if faster-whisper
-    isn't installed, the transcript is empty, or no content words survive
-    the stopword/length filter.
+def _transcribe(path: str) -> str | None:
+    """Return the full transcript of ``path`` as a single string. Returns
+    ``None`` if faster-whisper isn't installed or transcription fails. The
+    mechanical stem-extraction and LLM-refinement paths both consume this.
     """
     try:
-        import faster_whisper  # noqa: F401  (just the import check)
+        import faster_whisper  # noqa: F401
     except Exception:
         return None
 
     try:
         model = _get_whisper_model()
-        # beam_size=1 is the fastest option; we don't need optimal decoding
-        # for a filename. Language hint avoids misdetection on short clips.
         segments, _info = model.transcribe(path, beam_size=1, language="en", vad_filter=True)
-        words: list[str] = []
+        text_parts: list[str] = []
         for seg in segments:
-            for raw in seg.text.split():
-                cleaned = "".join(c for c in raw.lower() if c.isalpha())
-                if len(cleaned) < 3:
-                    continue
-                if cleaned in TRANSCRIPTION_STOPWORDS:
-                    continue
-                words.append(cleaned)
-                if len(words) >= max_words:
-                    break
-            if len(words) >= max_words:
-                break
-        if not words:
-            return None
-        return "-".join(words)
+            text_parts.append(seg.text.strip())
+        transcript = " ".join(p for p in text_parts if p).strip()
+        return transcript if transcript else None
     except Exception as e:
         log.warning("Whisper transcription failed for %s: %s", path, e)
+        return None
+
+
+def _stem_from_transcript(transcript: str, max_words: int = 3) -> str | None:
+    """Reduce a full transcript to a hyphenated filename stem: strip
+    stopwords, filler, and short words, then join up to ``max_words`` of
+    what's left. Returns None if nothing usable survives.
+    """
+    words: list[str] = []
+    for raw in transcript.split():
+        cleaned = "".join(c for c in raw.lower() if c.isalpha())
+        if len(cleaned) < 3:
+            continue
+        if cleaned in TRANSCRIPTION_STOPWORDS:
+            continue
+        words.append(cleaned)
+        if len(words) >= max_words:
+            break
+    if not words:
+        return None
+    return "-".join(words)
+
+
+def _transcribe_to_stem(path: str, max_words: int = 3) -> str | None:
+    """Back-compat shim kept so existing call sites / tests keep working.
+    Equivalent to ``_stem_from_transcript(_transcribe(path), max_words)``.
+    """
+    transcript = _transcribe(path)
+    if transcript is None:
+        return None
+    return _stem_from_transcript(transcript, max_words)
+
+
+# ---------------------------------------------------------------------------
+# Local-LLM refinement via ollama
+# ---------------------------------------------------------------------------
+# Gemma 3 4B is small, fast on Apple Silicon (~200-500ms per short completion),
+# and produces coherent short names without pulling a larger model. Tunable
+# via OLLAMA_MODEL env var in case the user wants to experiment.
+OLLAMA_MODEL_DEFAULT = "gemma3:4b"
+OLLAMA_TIMEOUT_S = 8.0
+OLLAMA_PROMPT_TEMPLATE = """You are naming a short vocal audio sample for a music producer's sample library.
+
+Transcript: "{transcript}"
+
+Produce a memorable 2-4 word filename stem. Rules:
+- Lowercase only, words joined by hyphens (e.g. 'eternal-wave-chant')
+- Use evocative content words (nouns, strong verbs); skip filler
+- Max 40 characters total
+- Return ONLY the stem — no quotes, no explanation, no trailing punctuation
+
+Stem:"""
+
+
+def _sanitize_llm_stem(raw: str) -> str:
+    """Reduce LLM output to filename-safe chars. Strips wrapping quotes,
+    spaces/underscores become hyphens, collapses duplicate hyphens, trims
+    leading/trailing dashes."""
+    stem = raw.strip().lower()
+    # Take only the first line — LLMs sometimes add a second explanation line.
+    stem = stem.split("\n", 1)[0].strip()
+    # Strip common wrappers
+    for ch in ('"', "'", "`", "*", "_"):
+        stem = stem.replace(ch, "")
+    stem = stem.replace(" ", "-")
+    # Keep only ascii alphanumeric + hyphen
+    stem = "".join(c for c in stem if c.isascii() and (c.isalnum() or c == "-"))
+    while "--" in stem:
+        stem = stem.replace("--", "-")
+    return stem.strip("-")
+
+
+def _refine_transcript_with_llm(
+    transcript: str,
+    model: str = OLLAMA_MODEL_DEFAULT,
+) -> str | None:
+    """Ask the local ollama daemon to produce a catchy filename stem from
+    the full transcript. Returns ``None`` on any failure (ollama not
+    installed, daemon not running, model not pulled, empty output, etc.).
+
+    Deliberately swallows every exception so naming never fails the whole
+    save-to-library flow just because the LLM tier is down — the caller
+    still has the mechanical stem as a reliable fallback.
+    """
+    if not transcript or not transcript.strip():
+        return None
+
+    try:
+        import ollama  # type: ignore
+    except Exception:
+        return None
+
+    import os
+
+    model = os.environ.get("SAMPLE_CURATOR_OLLAMA_MODEL", model)
+
+    try:
+        prompt = OLLAMA_PROMPT_TEMPLATE.format(transcript=transcript.strip())
+        response = ollama.chat(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            options={
+                "temperature": 0.4,
+                "num_predict": 24,  # stems are short; cap tokens so we return fast
+            },
+            stream=False,
+        )
+        raw = response.get("message", {}).get("content", "")
+        sanitized = _sanitize_llm_stem(raw)
+        if not sanitized or len(sanitized) < 3 or len(sanitized) > 60:
+            return None
+        return sanitized
+    except Exception as e:
+        log.warning("Ollama refinement (%s) failed: %s", model, e)
         return None
 
 
@@ -500,6 +600,8 @@ def name_recording(
     key: str | None = None,
     use_clap: bool = True,
     use_transcription: bool = True,
+    use_llm: bool = True,
+    ab_test: bool = False,
 ) -> dict:
     """Produce a descriptive filename stem for a fresh recording.
 
@@ -508,15 +610,21 @@ def name_recording(
         bpm: Optional pre-computed BPM. Appended to the stem if present.
         key: Optional pre-computed musical key (e.g. "Am"). Appended to stem.
         use_clap: If False, skip CLAP and use only heuristic + heroku paths.
-            Useful for tests and for power users who don't want the ~1.5GB
-            model download.
         use_transcription: If False, skip Whisper transcription even when the
-            clip looks like speech. Useful for tests and for power users who
-            don't want to pull in the `transcription` extra.
+            clip looks like speech.
+        use_llm: If True (default), try ollama refinement on transcripts before
+            falling back to the mechanical first-content-words stem. When the
+            local ollama daemon is unreachable, we quietly fall through.
+        ab_test: If True, run both the mechanical-transcript path and the LLM
+            refinement path and return whichever was *not* chosen as the primary
+            in ``alternative``/``alternative_method`` fields. Lets the caller
+            display both to the user for side-by-side comparison.
 
     Returns:
-        Dict with keys ``stem``, ``tags`` (list of str), and ``method``
-        (one of ``"clap"``, ``"transcription"``, ``"heuristic"``, ``"heroku"``).
+        Dict with keys ``stem``, ``tags`` (list of str), ``method`` (one of
+        ``"clap"``, ``"transcription"``, ``"llm"``, ``"heuristic"``,
+        ``"heroku"``), and optionally ``alternative`` / ``alternative_method``
+        when A/B comparison succeeded.
     """
     if not os.path.exists(path):
         raise FileNotFoundError(path)
@@ -552,25 +660,46 @@ def name_recording(
             method = "clap"
 
     # Vocal-aware naming: if this looks like speech (CLAP said so, or the
-    # cheap spectral heuristic says so), try to transcribe it and use the
-    # first few content words as the stem. Produces names like
-    # `testing-microphone` or `we-ride-eternal` that are far more useful for
-    # recall than `amber-voice` or bare heuristic tags.
+    # cheap spectral heuristic says so), transcribe via Whisper. Then try
+    # two stem derivations in order:
+    #   1. LLM refinement of the full transcript (ollama) — best quality,
+    #      produces names like `eternal-wave-chant` from a long verse.
+    #   2. Mechanical stem: first 2-3 content words — deterministic, zero-deps,
+    #      always available if Whisper succeeded.
+    # When `ab_test=True`, whichever path did NOT become the primary stem is
+    # stashed in the response under `alternative` so the UI can surface both.
+    alternative_stem: str | None = None
+    alternative_method: str | None = None
+
     if use_transcription and features is not None:
         looks_vocal = clap_says_vocal or _looks_like_speech(features)
         if looks_vocal:
-            transcript_stem = _transcribe_to_stem(path)
-            if transcript_stem:
-                # When CLAP was confident the sample was vocal, preserve the
-                # vocal tag alongside the transcript-derived name so library
-                # search by tag still works.
-                if clap_says_vocal:
-                    # Keep existing CLAP tags (already populated above)
-                    pass
-                else:
-                    tags = ["vocal"]
-                base = transcript_stem
-                method = "transcription"
+            transcript = _transcribe(path)
+            if transcript:
+                mechanical_stem = _stem_from_transcript(transcript)
+                llm_stem = (
+                    _refine_transcript_with_llm(transcript) if use_llm else None
+                )
+
+                # Prefer LLM output when it's available; otherwise fall back
+                # to the mechanical stem. Both are derived from the same
+                # transcript so they represent the same content differently.
+                if llm_stem:
+                    base = llm_stem
+                    method = "llm"
+                    if ab_test and mechanical_stem and mechanical_stem != llm_stem:
+                        alternative_stem = mechanical_stem
+                        alternative_method = "transcription"
+                elif mechanical_stem:
+                    base = mechanical_stem
+                    method = "transcription"
+                    # In A/B mode we'd normally stash the LLM alt here, but
+                    # LLM already declined — nothing to show.
+
+                if base is not None:
+                    # Preserve CLAP vocal tags when present, else tag as vocal.
+                    if not clap_says_vocal:
+                        tags = ["vocal"]
 
     if base is None and features is not None:
         heur = _heuristic_tag_from_features(features)
@@ -594,4 +723,8 @@ def name_recording(
         if safe_key:
             parts.append(safe_key)
 
-    return {"stem": "_".join(parts), "tags": tags, "method": method}
+    result: dict = {"stem": "_".join(parts), "tags": tags, "method": method}
+    if alternative_stem:
+        result["alternative"] = alternative_stem
+        result["alternative_method"] = alternative_method
+    return result

@@ -203,6 +203,8 @@ export function useRecorder() {
             sampleId: result.sample_id,
             namingTags: result.naming_tags ?? [],
             namingMethod: result.naming_method ?? "unknown",
+            namingAlternative: result.naming_alternative,
+            namingAlternativeMethod: result.naming_alternative_method,
           });
           setTimeout(() => {
             useRecorderStore.getState().setLastSavedSample(null);

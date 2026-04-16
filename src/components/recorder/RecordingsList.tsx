@@ -17,11 +17,19 @@ function getFilename(path: string): string {
 /**
  * Visual identifier for how the filename was generated. Small + subtle so
  * it doesn't compete with the filename, but lets the user audit quality
- * (seeing lots of "heroku" means the heuristic isn't firing; seeing "clap"
- * means CLAP inference is installed and confident).
+ * (seeing lots of "heroku" means the heuristic isn't firing; seeing "llm"
+ * means the local ollama daemon produced the name).
+ *
+ * Palette is deliberately ordered by "strength of signal" — pink/magenta
+ * for LLM (most semantic), blue for direct transcript, violet for CLAP
+ * classification, cyan for heuristic, amber for heroku, gray for the
+ * sidecar-down fallback — so the Recent list visually maps at a glance
+ * to where each name came from.
  */
 function NamingBadge({ method }: { method: string }) {
   const palette: Record<string, string> = {
+    llm: "bg-pink-900/40 text-pink-300 border-pink-700/50",
+    transcription: "bg-sky-900/40 text-sky-300 border-sky-700/50",
     clap: "bg-violet-900/40 text-violet-300 border-violet-700/50",
     heuristic: "bg-blue-900/40 text-blue-300 border-blue-700/50",
     heroku: "bg-amber-900/40 text-amber-300 border-amber-700/50",
@@ -139,6 +147,20 @@ export function RecordingsList() {
               <span className="ml-2 text-green-400 text-[10px] font-medium">Saved</span>
             )}
           </div>
+          {/* A/B alternative — shows the OTHER naming path's output so the
+              user can compare at a glance. Only visible when A/B mode is on
+              and both paths produced distinct usable stems. */}
+          {rec.naming_alternative && rec.naming_alternative_method && (
+            <div
+              className="mt-0.5 flex items-center text-[10px] text-gray-500"
+              data-testid="naming-alternative"
+              title="A/B alternative name from the other naming path"
+            >
+              <span className="text-gray-600 mr-1">alt:</span>
+              <span className="truncate max-w-[240px]">{rec.naming_alternative}</span>
+              <NamingBadge method={rec.naming_alternative_method} />
+            </div>
+          )}
           {expandedIndex === i && <InlinePlayer rec={rec} />}
         </div>
       ))}

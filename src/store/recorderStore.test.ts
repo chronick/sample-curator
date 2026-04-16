@@ -40,6 +40,7 @@ describe('useRecorderStore', () => {
         default_device: null,
         arm_threshold_db: -40,
         arm_silence_ms: 2000,
+        llm_ab_test: false,
       },
       isArmed: false,
       isRecording: false,
@@ -111,6 +112,7 @@ describe('useRecorderStore', () => {
       default_device: 'usb-1',
       arm_threshold_db: -30,
       arm_silence_ms: 1500,
+      llm_ab_test: true,
     };
     useRecorderStore.getState().setConfig(newConfig);
 

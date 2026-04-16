@@ -244,10 +244,20 @@ struct RecorderSaveResult {
     pack_name: Option<String>,
     /// ML-derived tags (CLAP categories or heuristic tag). May be empty.
     naming_tags: Vec<String>,
-    /// How the name was produced: `"clap"`, `"heuristic"`, `"heroku"`
-    /// (Python heroku fallback), or `"heroku-fallback"` (Rust-side fallback
-    /// when the sidecar itself was unreachable).
+    /// How the name was produced: `"clap"`, `"transcription"`, `"llm"`,
+    /// `"heuristic"`, `"heroku"` (Python heroku fallback), or
+    /// `"heroku-fallback"` (Rust-side fallback when the sidecar itself was
+    /// unreachable).
     naming_method: String,
+    /// Alternative stem when A/B test mode is on and both naming paths
+    /// produced usable names (e.g. mechanical transcript vs LLM refinement).
+    /// None when A/B is off, when the paths agreed, or when only one path ran.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    naming_alternative: Option<String>,
+    /// Method that produced the alternative — always the "other" method vs
+    /// `naming_method`. None when `naming_alternative` is None.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    naming_alternative_method: Option<String>,
 }
 
 #[tauri::command]
@@ -257,20 +267,32 @@ fn recorder_save_to_library(
     state: State<'_, DbState>,
     recorder_state: State<'_, RecorderState>,
     app_state: State<'_, AppState>,
+    config_state: State<'_, RecorderConfigState>,
 ) -> Result<RecorderSaveResult, String> {
     // Wait for writer thread to finish flushing the WAV before reading it
     recorder::audio_capture::wait_for_writer(&recorder_state, 30_000)?;
 
-    // Auto-name the recording *before* we insert it into the library so the
-    // DB path matches what's on disk. Runs the Python sidecar's
-    // `name_recording` handler (CLAP / heuristic / heroku-style), and falls
-    // back to a Rust-side heroku generator if the sidecar is unreachable.
     // Remember the input path so the frontend can swap the Recent list entry.
     let original_path = path.clone();
-    let named = auto_name_recording(&path, &app_state);
+
+    // Auto-name the recording *before* we insert it into the library so the
+    // DB path matches what's on disk. Runs the Python sidecar's
+    // `name_recording` handler (CLAP / transcription / LLM / heuristic / heroku),
+    // and falls back to a Rust-side heroku generator if the sidecar is unreachable.
+    //
+    // When the user has A/B test mode on, the sidecar runs both the mechanical
+    // transcript path and the LLM-refinement path for vocal clips and returns
+    // both so the UI can surface them for side-by-side comparison.
+    let ab_test = config_state
+        .get()
+        .map(|c| c.llm_ab_test)
+        .unwrap_or(false);
+    let named = auto_name_recording(&path, &app_state, ab_test);
     let final_path = named.new_path.clone();
     let extra_tags = named.tags.clone();
     let naming_method = named.method.clone();
+    let naming_alternative = named.alternative.clone();
+    let naming_alternative_method = named.alternative_method.clone();
 
     let db_guard = state.get_db()?;
     let db = db_guard.as_ref().ok_or("Database not initialized")?;
@@ -354,6 +376,8 @@ fn recorder_save_to_library(
         pack_name,
         naming_tags: extra_tags,
         naming_method,
+        naming_alternative,
+        naming_alternative_method,
     })
 }
 
@@ -361,11 +385,20 @@ fn recorder_save_to_library(
 /// in place. On any failure (sidecar missing, spawn error, bad response)
 /// falls back to the Rust-side heroku-style generator. Always returns a
 /// usable path — either the renamed one or the original unchanged.
-fn auto_name_recording(path: &str, app_state: &AppState) -> recorder::naming::AutoNameResult {
+///
+/// When `ab_test` is true, asks the sidecar to run both the mechanical-
+/// transcript and LLM-refinement naming paths and return whichever was NOT
+/// picked as primary in `alternative`/`alternative_method`. Used by the UI
+/// to surface both names side-by-side for A/B comparison.
+fn auto_name_recording(
+    path: &str,
+    app_state: &AppState,
+    ab_test: bool,
+) -> recorder::naming::AutoNameResult {
     use recorder::naming;
 
     // Build + send the sidecar request. If any step fails, bail to fallback.
-    let request = naming::build_sidecar_request(1, path, None, None);
+    let request = naming::build_sidecar_request(1, path, None, None, ab_test);
     let sidecar_response = {
         let mut guard = match app_state.sidecar.lock() {
             Ok(g) => g,
@@ -390,7 +423,7 @@ fn auto_name_recording(path: &str, app_state: &AppState) -> recorder::naming::Au
         }
     };
 
-    let (stem, tags, method) = match naming::parse_sidecar_response(&response) {
+    let fields = match naming::parse_sidecar_response(&response) {
         Some(v) => v,
         None => {
             eprintln!(
@@ -400,13 +433,20 @@ fn auto_name_recording(path: &str, app_state: &AppState) -> recorder::naming::Au
             return naming::fallback_rename(path);
         }
     };
-    let safe_stem = naming::sanitize_stem(&stem);
+    let safe_stem = naming::sanitize_stem(&fields.stem);
     let new_path = naming::rename_with_stem(path, &safe_stem);
+    let sanitized_alt = fields
+        .alternative
+        .as_deref()
+        .map(naming::sanitize_stem)
+        .filter(|s| !s.is_empty());
     naming::AutoNameResult {
         new_path,
         stem: safe_stem,
-        tags,
-        method,
+        tags: fields.tags,
+        method: fields.method,
+        alternative: sanitized_alt,
+        alternative_method: fields.alternative_method,
     }
 }
 

@@ -48,6 +48,11 @@ export interface RecorderConfig {
   arm_threshold_db: number;
   /** Duration of continuous silence (below threshold) before arm mode auto-stops. */
   arm_silence_ms: number;
+  /**
+   * When true, vocal samples get both a mechanical-transcript name AND an
+   * LLM-refined name. The UI shows both side-by-side. Default false.
+   */
+  llm_ab_test: boolean;
 }
 
 export interface SaveResult {
@@ -60,8 +65,16 @@ export interface SaveResult {
   pack_name: string | null;
   /** ML-derived tags from CLAP or heuristic classifier. */
   naming_tags: string[];
-  /** How the name was produced: "clap" | "heuristic" | "heroku" | "heroku-fallback". */
+  /** How the name was produced: "clap" | "transcription" | "llm" | "heuristic" | "heroku" | "heroku-fallback". */
   naming_method: string;
+  /**
+   * Alternative stem from the A/B test: when the user has A/B mode on and
+   * both the mechanical-transcript and LLM-refinement paths produced usable
+   * names, this is whichever was NOT selected as the primary.
+   */
+  naming_alternative?: string;
+  /** Method that produced the alternative stem. */
+  naming_alternative_method?: string;
 }
 
 export interface RecordingEntry extends RecordingInfo {
@@ -70,6 +83,13 @@ export interface RecordingEntry extends RecordingInfo {
   naming_tags?: string[];
   /** How the filename was generated. Shown as a subtle badge in the UI. */
   naming_method?: string;
+  /**
+   * Alternative stem from the A/B test (e.g. mechanical transcript when
+   * `naming_method` is "llm", or vice versa). UI shows both side-by-side
+   * so the user can compare naming quality.
+   */
+  naming_alternative?: string;
+  naming_alternative_method?: string;
   /**
    * True while `recorder_save_to_library` is in flight for this entry. During
    * this window the physical WAV file is being renamed on disk, so attempting

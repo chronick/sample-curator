@@ -99,6 +99,27 @@ export function ArmControls() {
         />
         <span className="text-gray-500">ms</span>
       </label>
+
+      {/* A/B test toggle — when on, vocal clips get both a mechanical
+          transcript-derived name AND an LLM-refined name; the alternative
+          shows as a second line in the Recent list. Let power users compare
+          naming quality without committing to one path. */}
+      <label
+        className="flex items-center gap-1.5 text-gray-400 cursor-pointer select-none ml-auto"
+        title="Compare mechanical transcript naming vs LLM-refined naming on vocal samples"
+        data-testid="llm-ab-toggle"
+      >
+        <input
+          type="checkbox"
+          checked={config.llm_ab_test}
+          onChange={(e) => persistConfig({ llm_ab_test: e.target.checked })}
+          className="accent-pink-500"
+          aria-label="LLM A/B test mode"
+        />
+        <span className="text-[10px] tracking-wide uppercase text-pink-300/80">
+          A/B LLM
+        </span>
+      </label>
     </div>
   );
 }
