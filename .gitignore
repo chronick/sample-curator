@@ -29,3 +29,8 @@ src-tauri/gen/
 
 # E2E test artifacts
 e2e/screenshots/
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
