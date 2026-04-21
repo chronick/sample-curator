@@ -17,6 +17,7 @@ Desktop application for managing your audio sample library. Browse, import, tag,
 - **Python** 3.11+
 - **uv** (Python package manager)
 - **Rust** (for Tauri builds)
+- **ollama** (optional) — for LLM-refined vocal sample names
 
 ## Quick Start
 
@@ -53,6 +54,28 @@ npm start
 ```
 
 This starts both the Vite dev server and Tauri app.
+
+### 4. Enable LLM Vocal Naming (Optional)
+
+Vocal samples are transcribed by Whisper and can be further refined by a local LLM into more evocative filenames (e.g. *'we ride the eternal wave'* → *'eternal-wave-chant'* instead of the mechanical *'ride-eternal-wave'*). Without this, the LLM tier is silently skipped and the mechanical name is used.
+
+```bash
+# 1. Install ollama
+brew install ollama
+# or: download from https://ollama.com/download
+
+# 2. Start the daemon
+brew services start ollama
+# or: `ollama serve` to run in the foreground
+
+# 3. Pull the model (~3 GB, one-time)
+ollama pull gemma3:4b
+
+# 4. Install the LLM sidecar extra
+cd sidecar && uv sync --extra llm
+```
+
+To use a different model, set `SAMPLE_CURATOR_OLLAMA_MODEL=<model-tag>` in the environment before launching the app.
 
 ## Usage
 

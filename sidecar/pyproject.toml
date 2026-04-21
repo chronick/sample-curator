@@ -72,8 +72,10 @@ transcription = [
 ]
 
 # Local LLM refinement (via ollama) — turns the mechanical transcript-derived
-# stem into a more evocative name. Requires an ollama daemon running locally;
-# the client is ~10KB and has no other deps.
+# stem into a more evocative name. Requires an ollama daemon running locally
+# with `gemma3:4b` pulled (or whatever `SAMPLE_CURATOR_OLLAMA_MODEL` overrides
+# to). The client is ~10KB and has no other deps. See README's
+# "Enable LLM Vocal Naming" section for the full install flow.
 llm = [
     "ollama>=0.3.0",
 ]
