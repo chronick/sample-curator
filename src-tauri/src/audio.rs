@@ -24,20 +24,60 @@ pub struct AudioStatus {
     pub position: f64,
 }
 
+// Build a rodio output stream at the given sample rate, if the default output
+// device supports it. Returns the stream, a handle, and the rate the stream was
+// actually opened at (which may differ from `target_rate` on fallback).
+//
+// Why: rodio 0.17's mixer will resample any source whose rate differs from the
+// stream's rate, using a linear-interpolation resampler that produces audible
+// artifacts on common conversions like 44.1→48 kHz. Opening the stream at the
+// source rate sidesteps that path entirely.
+fn build_output_stream_for_rate(
+    target_rate: u32,
+) -> Option<(rodio::OutputStream, rodio::OutputStreamHandle, u32)> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+
+    let host = cpal::default_host();
+    let device = host.default_output_device()?;
+    let target = cpal::SampleRate(target_rate);
+
+    let matched = device.supported_output_configs().ok().and_then(|configs| {
+        configs
+            .filter_map(|range| {
+                if range.min_sample_rate() <= target && target <= range.max_sample_rate() {
+                    Some(range.with_sample_rate(target))
+                } else {
+                    None
+                }
+            })
+            .next()
+    });
+
+    if let Some(config) = matched {
+        let rate = config.sample_rate().0;
+        if let Ok((s, h)) = rodio::OutputStream::try_from_device_config(&device, config) {
+            return Some((s, h, rate));
+        }
+    }
+
+    // Fallback: device's native config (resampling path — may glitch, but keeps audio alive).
+    let default_rate = device.default_output_config().ok().map(|c| c.sample_rate().0)?;
+    let (s, h) = rodio::OutputStream::try_default().ok()?;
+    Some((s, h, default_rate))
+}
+
 // Audio thread that owns the rodio objects
 fn audio_thread(rx: std::sync::mpsc::Receiver<AudioCommand>) {
-    use rodio::{Decoder, OutputStream, Sink, Source};
+    use rodio::{Decoder, Sink, Source};
     use std::fs::File;
     use std::io::BufReader;
 
-    // Create output stream - this must stay alive for audio to play
-    let (_stream, stream_handle) = match OutputStream::try_default() {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Failed to open audio output: {}", e);
-            return;
-        }
-    };
+    // Output stream is lazy: built on first Play at the source file's sample rate,
+    // rebuilt when a subsequent file's rate differs. The third tuple element is the
+    // rate the stream was actually opened at (may differ from requested on fallback).
+    // CoreAudio rate renegotiation costs ~50–100ms; caching by rate avoids thrashing
+    // when auditioning a run of same-rate files.
+    let mut output: Option<(rodio::OutputStream, rodio::OutputStreamHandle, u32)> = None;
 
     let mut sink: Option<Sink> = None;
     let mut duration: f64 = 0.0;
@@ -50,21 +90,12 @@ fn audio_thread(rx: std::sync::mpsc::Receiver<AudioCommand>) {
     loop {
         match rx.recv() {
             Ok(AudioCommand::Play(path)) => {
-                // Stop any current playback
+                // Stop any current playback BEFORE potentially dropping the stream.
                 if let Some(s) = sink.take() {
                     s.stop();
                 }
 
-                // Create new sink
-                let new_sink = match Sink::try_new(&stream_handle) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        eprintln!("Failed to create sink: {}", e);
-                        continue;
-                    }
-                };
-
-                // Open and decode file
+                // Open and decode file first so we know its sample rate.
                 let file = match File::open(&path) {
                     Ok(f) => f,
                     Err(e) => {
@@ -82,20 +113,53 @@ fn audio_thread(rx: std::sync::mpsc::Receiver<AudioCommand>) {
                     }
                 };
 
-                // Get duration
+                let src_rate = source.sample_rate();
+
+                // Rebuild output stream if rate mismatches current (or no stream yet).
+                // Drop the old stream first — on macOS this releases the CoreAudio
+                // device back to its default config before we re-open at the new rate.
+                let needs_rebuild = match &output {
+                    Some((_, _, rate)) => *rate != src_rate,
+                    None => true,
+                };
+                if needs_rebuild {
+                    // Explicitly drop the old stream before building a new one so
+                    // CoreAudio can re-negotiate the device config at the new rate.
+                    drop(output.take());
+                    output = build_output_stream_for_rate(src_rate);
+                }
+
+                let stream_handle = match output.as_ref() {
+                    Some((_, handle, _)) => handle,
+                    None => {
+                        eprintln!("Failed to open audio output at {} Hz", src_rate);
+                        continue;
+                    }
+                };
+
+                let new_sink = match Sink::try_new(stream_handle) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("Failed to create sink: {}", e);
+                        continue;
+                    }
+                };
+
                 duration = source.total_duration().map(|d: Duration| d.as_secs_f64()).unwrap_or(0.0);
 
-                // Reset position tracking
                 play_started_at = Some(Instant::now());
                 paused_at = None;
                 total_paused_duration = Duration::ZERO;
 
-                // Play
                 new_sink.append(source);
                 new_sink.play();
                 sink = Some(new_sink);
 
-                println!("Audio playing: {:?}, duration: {}", path, duration);
+                let actual_rate = output.as_ref().map(|(_, _, r)| *r).unwrap_or(0);
+                println!(
+                    "Audio playing: {:?}, duration: {}, src_rate: {}Hz, stream_rate: {}Hz",
+                    path, duration, src_rate, actual_rate
+                );
             }
             Ok(AudioCommand::Pause) => {
                 if let Some(ref s) = sink {
