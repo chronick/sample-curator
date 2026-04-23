@@ -510,10 +510,9 @@ def _transcribe_to_stem(path: str, max_words: int = 3) -> str | None:
 # ---------------------------------------------------------------------------
 # Local-LLM refinement via ollama
 # ---------------------------------------------------------------------------
-# Gemma 3 4B is small, fast on Apple Silicon (~200-500ms per short completion),
-# and produces coherent short names without pulling a larger model. Tunable
-# via OLLAMA_MODEL env var in case the user wants to experiment.
-OLLAMA_MODEL_DEFAULT = "gemma3:4b"
+# Model selection lives in ollama_status.resolve_model(); env-var override,
+# persisted UI choice, and auto-detect from a ranked list all funnel through
+# there. The active model is read via ``OllamaStatus.current_model()``.
 OLLAMA_TIMEOUT_S = 8.0
 OLLAMA_PROMPT_TEMPLATE = """You are naming a short vocal audio sample for a music producer's sample library.
 
@@ -546,13 +545,10 @@ def _sanitize_llm_stem(raw: str) -> str:
     return stem.strip("-")
 
 
-def _refine_transcript_with_llm(
-    transcript: str,
-    model: str = OLLAMA_MODEL_DEFAULT,
-) -> str | None:
+def _refine_transcript_with_llm(transcript: str) -> str | None:
     """Ask the local ollama daemon to produce a catchy filename stem from
     the full transcript. Returns ``None`` on any failure (ollama not
-    installed, daemon not running, model not pulled, empty output, etc.).
+    installed, daemon not running, no model selected, empty output, etc.).
 
     Deliberately swallows every exception so naming never fails the whole
     save-to-library flow just because the LLM tier is down — the caller
@@ -566,9 +562,11 @@ def _refine_transcript_with_llm(
     except Exception:
         return None
 
-    import os
+    from sample_curation_api.ollama_status import OllamaStatus
 
-    model = os.environ.get("SAMPLE_CURATOR_OLLAMA_MODEL", model)
+    model = OllamaStatus.instance().current_model()
+    if not model:
+        return None
 
     try:
         prompt = OLLAMA_PROMPT_TEMPLATE.format(transcript=transcript.strip())
