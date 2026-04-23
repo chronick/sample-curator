@@ -360,7 +360,7 @@ class TestLLMRefinement:
         assert naming._refine_transcript_with_llm("") is None
         assert naming._refine_transcript_with_llm("   ") is None
 
-    def test_refine_returns_sanitized_llm_output(self):
+    def test_refine_returns_sanitized_llm_output(self, seeded_ollama_model):
         fake_ollama = type("M", (), {})()
 
         def fake_chat(**kwargs):
@@ -371,7 +371,7 @@ class TestLLMRefinement:
             result = naming._refine_transcript_with_llm("we ride the eternal wave")
             assert result == "eternal-wave-chant"
 
-    def test_refine_returns_none_on_ollama_exception(self):
+    def test_refine_returns_none_on_ollama_exception(self, seeded_ollama_model):
         fake_ollama = type("M", (), {})()
 
         def fake_chat(**kwargs):
@@ -381,13 +381,19 @@ class TestLLMRefinement:
         with patch.dict("sys.modules", {"ollama": fake_ollama}):
             assert naming._refine_transcript_with_llm("hello") is None
 
-    def test_refine_rejects_too_short_stem(self):
+    def test_refine_returns_none_when_no_model_selected(self):
+        fake_ollama = type("M", (), {})()
+        fake_ollama.chat = lambda **kw: {"message": {"content": "hello-world"}}
+        with patch.dict("sys.modules", {"ollama": fake_ollama}):
+            assert naming._refine_transcript_with_llm("hi") is None
+
+    def test_refine_rejects_too_short_stem(self, seeded_ollama_model):
         fake_ollama = type("M", (), {})()
         fake_ollama.chat = lambda **kw: {"message": {"content": "a"}}
         with patch.dict("sys.modules", {"ollama": fake_ollama}):
             assert naming._refine_transcript_with_llm("hi") is None
 
-    def test_refine_rejects_too_long_stem(self):
+    def test_refine_rejects_too_long_stem(self, seeded_ollama_model):
         fake_ollama = type("M", (), {})()
         fake_ollama.chat = lambda **kw: {"message": {"content": "a" * 100}}
         with patch.dict("sys.modules", {"ollama": fake_ollama}):

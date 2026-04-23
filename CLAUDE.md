@@ -191,7 +191,7 @@ Core dependencies are inlined in pyproject.toml for self-sufficiency:
 
 Optional extras for heavy features:
 - `[transcription]`: Speech transcription for vocal samples (faster-whisper)
-- `[llm]`: LLM-refined vocal naming via local ollama daemon (ollama client). Requires `gemma3:4b` (or override via `SAMPLE_CURATOR_OLLAMA_MODEL`) pulled into a running ollama daemon — see README for install steps.
+- `[llm]`: LLM-refined vocal naming via local ollama daemon (ollama client). The sidecar auto-detects a model from a ranked list (`gemma4:e2b` → `gemma3:1b` → `qwen2.5:3b`); override with `SAMPLE_CURATOR_OLLAMA_MODEL` or persist via the `set_ollama_model` RPC — see README for install steps.
 - `[embedding]`: CLAP embeddings (torch, laion-clap)
 - `[fingerprint]`: Audio fingerprinting (pyacoustid)
 - `[all]`: Everything
@@ -215,7 +215,7 @@ Optional extras for heavy features:
 Vocal samples fall through to mechanical transcript-derived names when the LLM tier can't reach ollama. Check in order:
 - ollama installed? `brew install ollama` (or https://ollama.com/download)
 - ollama daemon running? `brew services start ollama` or `ollama serve`
-- Model pulled? `ollama pull gemma3:4b` (or whatever `SAMPLE_CURATOR_OLLAMA_MODEL` is set to)
+- Model pulled? `ollama pull gemma3:1b` (or any model in the ranked list, or whatever `SAMPLE_CURATOR_OLLAMA_MODEL` is set to)
 - `[llm]` extra installed? `cd sidecar && uv sync --extra llm`
 
 See README's *Enable LLM Vocal Naming* section for the full install flow.
