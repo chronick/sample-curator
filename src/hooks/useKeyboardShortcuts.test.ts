@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { useKeyboardShortcuts } from "./useKeyboardShortcuts";
 import type { Sample, ViewMode } from "../api/types";
@@ -34,10 +34,6 @@ function makeSample(overrides: Partial<Sample> = {}): Sample {
     analyzed_at: null,
     ...overrides,
   };
-}
-
-function makeConfig(overrides: Partial<ReturnType<typeof defaultConfig>> = {}) {
-  return { ...defaultConfig(), ...overrides };
 }
 
 function defaultConfig() {

@@ -74,7 +74,6 @@ describe("useJobs", () => {
     const { unmount } = renderHook(() => useJobs());
 
     await vi.advanceTimersByTimeAsync(0);
-    const callsBeforeUnmount = mockApi.getJobStats.mock.calls.length;
 
     unmount();
 

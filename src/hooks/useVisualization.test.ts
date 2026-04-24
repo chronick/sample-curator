@@ -7,14 +7,11 @@ import {
 } from "./useVisualization";
 
 // Mock ResizeObserver
-let resizeCallback: ResizeObserverCallback;
 const mockObserve = vi.fn();
 const mockDisconnect = vi.fn();
 
 class MockResizeObserver {
-  constructor(callback: ResizeObserverCallback) {
-    resizeCallback = callback;
-  }
+  constructor(_callback: ResizeObserverCallback) {}
   observe = mockObserve;
   disconnect = mockDisconnect;
   unobserve = vi.fn();
