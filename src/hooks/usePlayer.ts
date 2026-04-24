@@ -41,7 +41,7 @@ export function usePlayer() {
           }
           setState((s) => ({ ...s, isPlaying: false, position: 0 }));
         }
-      } catch (err) {
+      } catch {
         // Ignore errors during polling
       }
     }, 100); // Poll frequently for smooth playhead

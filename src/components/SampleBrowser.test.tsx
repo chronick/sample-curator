@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatRelativeTime, isFreshlyRecorded } from "./SampleBrowser";
+import { formatRelativeTime, isFreshlyRecorded } from "../utils/time";
 
 describe("formatRelativeTime", () => {
   const now = Date.parse("2026-04-16T12:00:00Z");

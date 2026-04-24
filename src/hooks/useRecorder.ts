@@ -5,43 +5,16 @@ import { useArmMode } from "./useArmMode";
 import type { AudioDevice, RecordingInfo, RecorderConfig, RecordingWaveformData, SaveResult } from "../types/recorder";
 
 export function useRecorder() {
-  const store = useRecorderStore();
   const animFrameRef = useRef<number>(0);
   const pollingRef = useRef(false);
   const initializedRef = useRef(false);
   const waveformPollRef = useRef<number>(0);
   const waveformPollActiveRef = useRef(false);
 
-  // Load devices and config on mount (only once across all hook instances)
-  useEffect(() => {
-    if (initializedRef.current) return;
-    initializedRef.current = true;
-
-    refreshDevices();
-    invoke<RecorderConfig>("recorder_get_config")
-      .then((config) => {
-        store.setConfig(config);
-        if (config.default_device) {
-          selectDevice(config.default_device);
-        }
-      })
-      .catch((e) => console.warn("Failed to load recorder config:", e));
-
-    return () => {
-      pollingRef.current = false;
-      cancelAnimationFrame(animFrameRef.current);
-      waveformPollActiveRef.current = false;
-      if (waveformPollRef.current) {
-        window.clearTimeout(waveformPollRef.current);
-        waveformPollRef.current = 0;
-      }
-    };
-  }, []);
-
   const refreshDevices = useCallback(async () => {
     try {
       const devices = await invoke<AudioDevice[]>("recorder_list_audio_devices");
-      store.setDevices(devices);
+      useRecorderStore.getState().setDevices(devices);
       return devices;
     } catch (e) {
       console.warn("Failed to list audio devices:", e);
@@ -73,20 +46,20 @@ export function useRecorder() {
           invoke<number[]>("recorder_get_spectrum_data", { numBins: 128 }),
         ]);
 
-        store.setLevels(levels);
-        if (waveform) store.setWaveformData(waveform);
-        store.setSpectrumData(spectrum);
+        const s = useRecorderStore.getState();
+        s.setLevels(levels);
+        if (waveform) s.setWaveformData(waveform);
+        s.setSpectrumData(spectrum);
 
         // Only update boolean states when they actually change to avoid re-renders
-        const currentState = useRecorderStore.getState();
-        if (currentState.isRecording !== status.is_recording) {
-          store.setRecordingState(status.is_recording);
+        if (s.isRecording !== status.is_recording) {
+          s.setRecordingState(status.is_recording);
         }
-        if (currentState.isMonitoring !== status.is_monitoring) {
-          store.setMonitoringState(status.is_monitoring);
+        if (s.isMonitoring !== status.is_monitoring) {
+          s.setMonitoringState(status.is_monitoring);
         }
         if (status.is_recording) {
-          store.setElapsedTime(status.elapsed_secs);
+          s.setElapsedTime(status.elapsed_secs);
         }
       } catch (e) {
         console.error("Recorder polling error:", e);
@@ -147,8 +120,9 @@ export function useRecorder() {
     async (deviceId: string) => {
       try {
         await invoke("recorder_select_device", { deviceId });
-        store.setSelectedDeviceId(deviceId);
-        store.setMonitoringState(true);
+        const s = useRecorderStore.getState();
+        s.setSelectedDeviceId(deviceId);
+        s.setMonitoringState(true);
         startPolling();
       } catch (e) {
         console.error("Failed to select device:", e);
@@ -157,8 +131,35 @@ export function useRecorder() {
     [startPolling]
   );
 
+  // Load devices and config on mount (only once across all hook instances)
+  useEffect(() => {
+    if (initializedRef.current) return;
+    initializedRef.current = true;
+
+    refreshDevices();
+    invoke<RecorderConfig>("recorder_get_config")
+      .then((config) => {
+        useRecorderStore.getState().setConfig(config);
+        if (config.default_device) {
+          selectDevice(config.default_device);
+        }
+      })
+      .catch((e) => console.warn("Failed to load recorder config:", e));
+
+    return () => {
+      pollingRef.current = false;
+      cancelAnimationFrame(animFrameRef.current);
+      waveformPollActiveRef.current = false;
+      if (waveformPollRef.current) {
+        window.clearTimeout(waveformPollRef.current);
+        waveformPollRef.current = 0;
+      }
+    };
+  }, [refreshDevices, selectDevice]);
+
   const startRecording = useCallback(async () => {
-    const { config } = useRecorderStore.getState();
+    const s = useRecorderStore.getState();
+    const { config } = s;
     try {
       await invoke("recorder_start_recording", {
         config: {
@@ -169,9 +170,9 @@ export function useRecorder() {
           session_name: null,
         },
       });
-      store.setRecordingState(true);
-      store.setElapsedTime(0);
-      store.setRecordingWaveform(null);
+      s.setRecordingState(true);
+      s.setElapsedTime(0);
+      s.setRecordingWaveform(null);
       startWaveformPoll();
     } catch (e) {
       console.error("Failed to start recording:", e);
@@ -182,9 +183,10 @@ export function useRecorder() {
     try {
       stopWaveformPoll();
       const info = await invoke<RecordingInfo>("recorder_stop_recording");
-      store.setRecordingState(false);
-      store.setElapsedTime(0);
-      store.addRecording(info);
+      const s = useRecorderStore.getState();
+      s.setRecordingState(false);
+      s.setElapsedTime(0);
+      s.addRecording(info);
 
       // Fire-and-forget: save + analyze in background — don't block the UI.
       // The backend auto-renames the file (CLAP / heuristic / heroku) before
