@@ -68,14 +68,16 @@ brew install ollama
 brew services start ollama
 # or: `ollama serve` to run in the foreground
 
-# 3. Pull the model (~3 GB, one-time)
-ollama pull gemma3:4b
+# 3. Pull a small, fast model (one-time)
+#    The sidecar auto-detects the first match from this ranked list:
+#      gemma4:e2b → gemma3:1b → qwen2.5:3b
+ollama pull gemma3:1b
 
 # 4. Install the LLM sidecar extra
 cd sidecar && uv sync --extra llm
 ```
 
-To use a different model, set `SAMPLE_CURATOR_OLLAMA_MODEL=<model-tag>` in the environment before launching the app.
+To use a different model, either set `SAMPLE_CURATOR_OLLAMA_MODEL=<model-tag>` in the environment before launching the app (hard override, disables auto-detect), or persist a choice via the `set_ollama_model` RPC.
 
 ## Usage
 

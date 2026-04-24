@@ -66,8 +66,22 @@ def handle_request(request: dict) -> dict:
         }
 
 
+def _startup_warmup() -> None:
+    """Resolve + warm up the ollama model in the background. Never raises."""
+    try:
+        from sample_curation_api.ollama_status import resolve_and_warmup
+
+        resolve_and_warmup()
+    except Exception as e:
+        print(f"[ollama] startup warmup failed: {e}", file=sys.stderr, flush=True)
+
+
 def main():
     """Main entry point - JSON-RPC server over stdio."""
+    import threading
+
+    threading.Thread(target=_startup_warmup, daemon=True).start()
+
     # Line-buffered stdio
     for line in sys.stdin:
         line = line.strip()
