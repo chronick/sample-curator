@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseQuery, splitTokens, unquote } from './QueryBar';
+import { parseQuery, splitTokens, unquote } from '../utils/queryParser';
 
 describe('parseQuery', () => {
   it('returns empty object for empty string', () => {

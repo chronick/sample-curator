@@ -463,7 +463,7 @@ export function SpectralColorWheel({
       {/* Low key data warning */}
       {keyDataPct < 20 && samples.length > 0 && (
         <div className="px-4 py-2 bg-yellow-900/20 border-b border-yellow-700/30 text-[11px] text-yellow-500/80">
-          Most samples don't have key data yet ({keyDataPct}%). Run analysis to populate this view.
+          Most samples don&apos;t have key data yet ({keyDataPct}%). Run analysis to populate this view.
         </div>
       )}
 

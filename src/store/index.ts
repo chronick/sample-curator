@@ -291,9 +291,15 @@ export const useStore = create<LibraryState>((set) => ({
 }));
 
 // Expose serializable store snapshot for automation control channel (dev only)
+declare global {
+  interface Window {
+    __STORE_STATE__?: Record<string, unknown>;
+  }
+}
+
 if (import.meta.env.DEV) {
   useStore.subscribe((state) => {
-    (window as any).__STORE_STATE__ = {
+    window.__STORE_STATE__ = {
       totalSamples: state.totalSamples,
       selectedSample: state.selectedSample
         ? {

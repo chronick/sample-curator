@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { api } from "../api/client";
 import type { DirectoryEntry } from "../api/types";
-import { parseQuery } from "./QueryBar";
+import { parseQuery } from "../utils/queryParser";
 
 interface FileBrowserProps {
   onSelectSample: (sampleId: number) => void;
@@ -256,7 +256,7 @@ export function FileBrowser({ onSelectSample, onPlayFile }: FileBrowserProps) {
         {roots.length === 0 ? (
           <div className="p-4 text-xs text-gray-500 text-center">
             <p>No directories configured.</p>
-            <p className="mt-1">Add watch directories in Settings or click "Open Folder".</p>
+            <p className="mt-1">Add watch directories in Settings or click &quot;Open Folder&quot;.</p>
           </div>
         ) : (
           roots.map((root) => {

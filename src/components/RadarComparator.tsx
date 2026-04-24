@@ -422,7 +422,7 @@ export function RadarComparator({
 
   // Filtered + sorted
   const filteredSamples = useMemo(() => {
-    let result = sampleData.filter((d) => {
+    const result = sampleData.filter((d) => {
       const sType = d.sample.sample_type || "unknown";
       if (!activeCategories.has(sType)) return false;
       if (searchTerm) {
