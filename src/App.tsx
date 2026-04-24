@@ -21,7 +21,9 @@ import { SpectralColorWheel } from "./components/SpectralColorWheel";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { DragHandle } from "./components/DragHandle";
 import { HeaderBar } from "./components/HeaderBar";
+import { OllamaBanner } from "./components/OllamaBanner";
 import { useLibrary } from "./hooks/useLibrary";
+import { useOllamaStatus } from "./hooks/useOllamaStatus";
 import { useStore } from "./store";
 import { usePlayer } from "./hooks/usePlayer";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
@@ -89,6 +91,7 @@ function AppContent() {
   const setActiveView = useStore((s) => s.setActiveView);
 
   const { jobStats } = useJobs();
+  const { status: llmStatus, refresh: refreshLlm, setModel: setLlmModel } = useOllamaStatus();
 
   // Panel sizes (px)
   const [leftWidth, setLeftWidth] = useState(256);
@@ -265,6 +268,7 @@ function AppContent() {
         showLeft={showLeft}
         showRight={showRight}
         showPlayer={showPlayer}
+        llmStatus={llmStatus}
         onSetActiveView={setActiveView}
         onToggleLeft={() => setShowLeft((v) => !v)}
         onToggleRight={() => setShowRight((v) => !v)}
@@ -273,6 +277,7 @@ function AppContent() {
         onShowImport={() => setShowImport(true)}
         onRefresh={refresh}
       />
+      <OllamaBanner status={llmStatus} onShowSettings={() => setShowSettings(true)} />
 
       {/* Main content */}
       <div className="flex flex-1 overflow-hidden">
@@ -641,7 +646,12 @@ function AppContent() {
 
       {/* Settings dialog */}
       {showSettings && (
-        <SettingsDialog onClose={() => setShowSettings(false)} />
+        <SettingsDialog
+          onClose={() => setShowSettings(false)}
+          llmStatus={llmStatus}
+          onRefreshLlm={refreshLlm}
+          onSetLlmModel={setLlmModel}
+        />
       )}
     </div>
   );
