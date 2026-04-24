@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useRecorderStore } from './recorderStore';
-import type { AudioDevice, RecordingInfo, RecordingEntry, SaveResult } from '../types/recorder';
+import type { AudioDevice, RecordingInfo, SaveResult } from '../types/recorder';
 
 // Helper to create a mock audio device
 function makeDevice(overrides: Partial<AudioDevice> = {}): AudioDevice {
@@ -268,7 +268,15 @@ describe('useRecorderStore', () => {
   });
 
   it('setLastSavedSample sets a save result', () => {
-    const result: SaveResult = { sample_id: 42, path: '/library/kick-001.wav', analyzed: true, pack_name: 'Recordings' };
+    const result: SaveResult = {
+      sample_id: 42,
+      original_path: '/recordings/session-001.wav',
+      path: '/library/kick-001.wav',
+      analyzed: true,
+      pack_name: 'Recordings',
+      naming_tags: [],
+      naming_method: 'whisper',
+    };
     useRecorderStore.getState().setLastSavedSample(result);
 
     const state = useRecorderStore.getState();
@@ -280,7 +288,15 @@ describe('useRecorderStore', () => {
   });
 
   it('setLastSavedSample clears with null', () => {
-    const result: SaveResult = { sample_id: 42, path: '/library/kick-001.wav', analyzed: true, pack_name: 'Recordings' };
+    const result: SaveResult = {
+      sample_id: 42,
+      original_path: '/recordings/session-001.wav',
+      path: '/library/kick-001.wav',
+      analyzed: true,
+      pack_name: 'Recordings',
+      naming_tags: [],
+      naming_method: 'whisper',
+    };
     useRecorderStore.getState().setLastSavedSample(result);
     useRecorderStore.getState().setLastSavedSample(null);
     expect(useRecorderStore.getState().lastSavedSample).toBeNull();

@@ -1,10 +1,12 @@
 import { describe, it, expect, vi } from "vitest";
+import type { ReactNode } from "react";
 import { render, screen } from "@testing-library/react";
 import { ErrorBoundary } from "./ErrorBoundary";
 
 // Component that throws during render
-function ThrowingComponent({ message }: { message: string }) {
+function ThrowingComponent({ message }: { message: string }): ReactNode {
   throw new Error(message);
+  return null;
 }
 
 describe("ErrorBoundary", () => {

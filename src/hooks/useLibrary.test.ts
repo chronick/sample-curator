@@ -3,7 +3,7 @@ import { renderHook, act } from "@testing-library/react";
 import { useStore } from "../store";
 import { api } from "../api";
 import { useLibrary } from "./useLibrary";
-import type { Sample, SearchResult, Pack } from "../api/types";
+import type { Sample, SearchResult } from "../api/types";
 
 vi.mock("../api", () => ({
   api: {

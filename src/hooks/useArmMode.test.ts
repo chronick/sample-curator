@@ -12,12 +12,12 @@ function setLevels(peak_db: number) {
 }
 
 describe("useArmMode", () => {
-  let startRecording: ReturnType<typeof vi.fn>;
-  let stopRecording: ReturnType<typeof vi.fn>;
+  let startRecording: ReturnType<typeof vi.fn<() => Promise<void>>>;
+  let stopRecording: ReturnType<typeof vi.fn<() => Promise<unknown>>>;
 
   beforeEach(() => {
-    startRecording = vi.fn().mockResolvedValue(undefined);
-    stopRecording = vi.fn().mockResolvedValue(undefined);
+    startRecording = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+    stopRecording = vi.fn<() => Promise<unknown>>().mockResolvedValue(undefined);
     // Reset store: disarmed, not recording, silent, defaults.
     useRecorderStore.setState({
       isArmed: false,
