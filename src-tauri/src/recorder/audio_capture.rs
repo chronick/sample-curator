@@ -1,5 +1,6 @@
 use super::metering::{calculate_stereo_levels, ChannelLevel, LevelData};
 use super::visualization;
+use chrono::{DateTime, Utc};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::SampleFormat;
 use crossbeam::channel::{self, Sender};
@@ -8,6 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Instant;
+use uuid::Uuid;
 
 const RING_BUFFER_SIZE: usize = 48000 * 2; // ~1 second at 48kHz stereo
 const RECORDING_CHUNK_SIZE: usize = 2048; // ~42ms at 48kHz mono — one FFT window per chunk
@@ -173,6 +175,17 @@ impl RecordingWaveformCache {
     }
 }
 
+/// In-memory session context produced when the recorder is armed.
+/// Lives only in `RecorderState`; not persisted. Cleared on disarm.
+/// Per task vault-ev9w (T2a) — sub-tasks T2b/T2c apply this tag to clips
+/// and expose it via DB-backed RPCs.
+#[derive(Debug, Clone, Serialize)]
+pub struct CurrentSessionContext {
+    pub session_tag: String,
+    pub started_at: DateTime<Utc>,
+    pub stem_separation_enabled: bool,
+}
+
 pub struct RecorderState {
     // Input monitoring (always-on when device selected)
     stream: Mutex<Option<SendStream>>,
@@ -201,6 +214,9 @@ pub struct RecorderState {
 
     // Incremental recording waveform cache (peaks + centroids computed per chunk)
     pub recording_waveform_cache: Arc<Mutex<RecordingWaveformCache>>,
+
+    // Session context — populated on arm-on, cleared on arm-off.
+    pub current_session: Mutex<Option<CurrentSessionContext>>,
 }
 
 impl RecorderState {
@@ -226,6 +242,49 @@ impl RecorderState {
             writer_finalized: Arc::new(AtomicBool::new(true)),
 
             recording_waveform_cache: Arc::new(Mutex::new(RecordingWaveformCache::new())),
+
+            current_session: Mutex::new(None),
+        }
+    }
+
+    /// Arm-on lifecycle hook. Idempotent: if already armed, leaves the
+    /// existing context (so `session_tag` is stable across re-entries
+    /// within one armed cycle). Defaults `stem_separation_enabled` to
+    /// `false` — Settings global wiring lands in T5.
+    pub fn arm_on(&self) -> Result<(), String> {
+        let mut session = self.current_session.lock().map_err(|e| e.to_string())?;
+        if session.is_none() {
+            let uuid = Uuid::new_v4();
+            *session = Some(CurrentSessionContext {
+                session_tag: format!("session:{}", uuid),
+                started_at: Utc::now(),
+                stem_separation_enabled: false,
+            });
+        }
+        Ok(())
+    }
+
+    /// Arm-off lifecycle hook. Drops the session context. No DB writes —
+    /// any tag application happens earlier in T2b at clip-finalize time.
+    pub fn arm_off(&self) -> Result<(), String> {
+        let mut session = self.current_session.lock().map_err(|e| e.to_string())?;
+        *session = None;
+        Ok(())
+    }
+
+    pub fn session_current(&self) -> Result<Option<CurrentSessionContext>, String> {
+        let session = self.current_session.lock().map_err(|e| e.to_string())?;
+        Ok(session.clone())
+    }
+
+    pub fn set_stem_separation(&self, enabled: bool) -> Result<(), String> {
+        let mut session = self.current_session.lock().map_err(|e| e.to_string())?;
+        match session.as_mut() {
+            Some(ctx) => {
+                ctx.stem_separation_enabled = enabled;
+                Ok(())
+            }
+            None => Err("not armed: no active session".to_string()),
         }
     }
 }
@@ -887,5 +946,83 @@ mod tests {
         let waveform = cache.get_waveform(800);
         assert!(waveform.peaks.is_empty());
         assert_eq!(waveform.duration, 0.0);
+    }
+
+    // ---- Session lifecycle (vault-ev9w / T2a) ----
+
+    #[test]
+    fn test_session_starts_none() {
+        let state = RecorderState::new();
+        assert!(state.session_current().unwrap().is_none());
+    }
+
+    #[test]
+    fn test_arm_on_creates_session() {
+        let state = RecorderState::new();
+        state.arm_on().unwrap();
+        let ctx = state.session_current().unwrap().expect("armed");
+        assert!(ctx.session_tag.starts_with("session:"));
+        assert!(!ctx.stem_separation_enabled);
+        // session_tag must be a valid UUID after the prefix
+        let uuid_part = &ctx.session_tag["session:".len()..];
+        Uuid::parse_str(uuid_part).expect("session tag carries a v4 UUID");
+    }
+
+    #[test]
+    fn test_session_tag_stable_across_calls() {
+        let state = RecorderState::new();
+        state.arm_on().unwrap();
+        let a = state.session_current().unwrap().unwrap().session_tag;
+        let b = state.session_current().unwrap().unwrap().session_tag;
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn test_arm_on_idempotent_within_cycle() {
+        let state = RecorderState::new();
+        state.arm_on().unwrap();
+        let tag1 = state.session_current().unwrap().unwrap().session_tag;
+        // Calling arm_on again without a disarm in between must not rotate
+        // the UUID — the existing session is still active.
+        state.arm_on().unwrap();
+        let tag2 = state.session_current().unwrap().unwrap().session_tag;
+        assert_eq!(tag1, tag2);
+    }
+
+    #[test]
+    fn test_arm_off_clears_session() {
+        let state = RecorderState::new();
+        state.arm_on().unwrap();
+        state.arm_off().unwrap();
+        assert!(state.session_current().unwrap().is_none());
+    }
+
+    #[test]
+    fn test_re_arm_rotates_uuid() {
+        let state = RecorderState::new();
+        state.arm_on().unwrap();
+        let first = state.session_current().unwrap().unwrap().session_tag;
+        state.arm_off().unwrap();
+        state.arm_on().unwrap();
+        let second = state.session_current().unwrap().unwrap().session_tag;
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn test_set_stem_separation_while_armed() {
+        let state = RecorderState::new();
+        state.arm_on().unwrap();
+        assert!(!state.session_current().unwrap().unwrap().stem_separation_enabled);
+        state.set_stem_separation(true).unwrap();
+        assert!(state.session_current().unwrap().unwrap().stem_separation_enabled);
+        state.set_stem_separation(false).unwrap();
+        assert!(!state.session_current().unwrap().unwrap().stem_separation_enabled);
+    }
+
+    #[test]
+    fn test_set_stem_separation_errors_when_not_armed() {
+        let state = RecorderState::new();
+        let err = state.set_stem_separation(true).unwrap_err();
+        assert!(err.contains("not armed"));
     }
 }

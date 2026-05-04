@@ -231,6 +231,21 @@ fn recorder_set_config(config: recorder::config::RecorderConfig, state: State<'_
     state.set(config)
 }
 
+#[tauri::command]
+fn session_current(
+    state: State<'_, RecorderState>,
+) -> Result<Option<recorder::audio_capture::CurrentSessionContext>, String> {
+    state.session_current()
+}
+
+#[tauri::command]
+fn session_set_stem_separation(
+    enabled: bool,
+    state: State<'_, RecorderState>,
+) -> Result<(), String> {
+    state.set_stem_separation(enabled)
+}
+
 #[derive(serde::Serialize)]
 struct RecorderSaveResult {
     sample_id: i64,
@@ -568,6 +583,8 @@ fn main() {
             recorder_open_recordings_dir,
             recorder_get_config,
             recorder_set_config,
+            session_current,
+            session_set_stem_separation,
             recorder_save_to_library,
         ])
         .run(tauri::generate_context!())
