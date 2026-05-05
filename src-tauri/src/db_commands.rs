@@ -429,6 +429,20 @@ pub fn db_list_tags(state: State<'_, DbState>) -> Result<Vec<String>, String> {
     Ok(tags.into_iter().map(|t| t.name).collect())
 }
 
+/// List user-facing tag names (autocomplete-safe).
+///
+/// Excludes system-tag prefixes (`session:`, `parent:`, `stem:`, `stems-`) that
+/// would otherwise pollute generic suggestion surfaces. Per-sample tag pills
+/// continue to render the unfiltered set via `db_get_sample`.
+#[tauri::command]
+pub fn db_list_user_tags(state: State<'_, DbState>) -> Result<Vec<String>, String> {
+    let db_guard = state.get_db()?;
+    let db = db_guard.as_ref().ok_or("Database not initialized")?;
+
+    let tags = db.get_user_tags().map_err(|e| e.to_string())?;
+    Ok(tags.into_iter().map(|t| t.name).collect())
+}
+
 /// Add tags to a sample.
 #[tauri::command]
 pub fn db_add_tags(

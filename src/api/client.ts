@@ -196,10 +196,19 @@ export const api = {
   },
 
   /**
-   * List all tags.
+   * List all tags (unfiltered). Use for diagnostics or contexts that need the
+   * full set; for autocomplete/suggestion surfaces prefer `listUserTags`.
    */
   async listTags(): Promise<string[]> {
     return invoke<string[]>("db_list_tags");
+  },
+
+  /**
+   * List tags suitable for user-facing autocomplete. Excludes system-tag
+   * prefixes (`session:`, `parent:`, `stem:`, `stems-`).
+   */
+  async listUserTags(): Promise<string[]> {
+    return invoke<string[]>("db_list_user_tags");
   },
 
   /**

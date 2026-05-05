@@ -490,6 +490,7 @@ fn main() {
             db_commands::db_delete_sample,
             db_commands::db_list_packs,
             db_commands::db_list_tags,
+            db_commands::db_list_user_tags,
             db_commands::db_add_tags,
             db_commands::db_remove_tags,
             db_commands::db_batch_update,

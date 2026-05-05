@@ -70,10 +70,12 @@ export function useLibrary() {
     }
   }, [setPacks]);
 
-  // Fetch tags
+  // Fetch tags for the global autocomplete/suggestion store.
+  // Uses the user-tag list so system prefixes (`session:`, `parent:`, …)
+  // don't pollute filter, query, or batch-edit suggestions.
   const fetchTags = useCallback(async () => {
     try {
-      const tagList = await api.listTags();
+      const tagList = await api.listUserTags();
       setTags(tagList);
     } catch (err) {
       console.error("Failed to fetch tags:", err);
