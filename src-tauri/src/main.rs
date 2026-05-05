@@ -19,6 +19,7 @@ mod recorder;
 mod search;
 mod sidecar;
 mod split;
+mod telemetry;
 mod transforms;
 mod watch;
 
@@ -32,6 +33,7 @@ use projects::ProjectState;
 use search::SearchState;
 use recorder::{RecorderState, RecorderConfigState};
 use sidecar::SidecarManager;
+use telemetry::TelemetryState;
 use watch::WatchState;
 use std::sync::Mutex;
 use tauri::State;
@@ -422,6 +424,18 @@ fn recorder_save_to_library(
         }
     });
 
+    telemetry::log_event(
+        telemetry::EventCategory::Clip,
+        "clip-finalized",
+        serde_json::json!({
+            "sample_id": sample_id,
+            "path": final_path,
+            "naming_method": naming_method,
+            "session_tag": session_tag,
+            "ab_test": ab_test,
+        }),
+    );
+
     Ok(RecorderSaveResult {
         sample_id,
         original_path,
@@ -531,6 +545,7 @@ fn main() {
         .manage(JobState::new())
         .manage(RecorderState::new())
         .manage(RecorderConfigState::new())
+        .manage(TelemetryState::new())
         .invoke_handler(tauri::generate_handler![
             sidecar_call,
             audio_play,
@@ -637,6 +652,9 @@ fn main() {
             orphans::scan_orphaned_recordings,
             orphans::delete_orphaned_recording,
             orphans::import_orphaned_recording,
+            // Telemetry / debug log (vault-259a)
+            telemetry::telemetry_recent_events,
+            telemetry::telemetry_log_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

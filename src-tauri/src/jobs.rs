@@ -163,12 +163,25 @@ pub fn start_job_worker(app_handle: tauri::AppHandle, state: State<'_, JobState>
                 match &progress {
                     JobProgress::Started { job_id, job_type } => {
                         println!("[Jobs] Job {} started: {:?}", job_id, job_type);
+                        crate::telemetry::log_event(
+                            crate::telemetry::EventCategory::Job,
+                            "job-started",
+                            serde_json::json!({
+                                "job_id": job_id,
+                                "job_type": format!("{:?}", job_type),
+                            }),
+                        );
                     }
                     JobProgress::Completed { job_id } => {
                         println!("[Jobs] Job {} completed", job_id);
                     }
                     JobProgress::Failed { job_id, error } => {
                         eprintln!("[Jobs] Job {} failed: {}", job_id, error);
+                        crate::telemetry::log_event(
+                            crate::telemetry::EventCategory::Job,
+                            "job-failed",
+                            serde_json::json!({ "job_id": job_id, "error": error }),
+                        );
                     }
                 }
                 // Emit Tauri event for real-time frontend updates

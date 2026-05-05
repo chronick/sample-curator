@@ -174,8 +174,39 @@ The app stores data in `~/.music-hub-data/`:
 ~/.music-hub-data/
 ├── sample-library/
 │   └── library.db      # SQLite database
+├── recordings/         # Captured WAVs from the Recorder
+├── logs/               # events-YYYY-MM-DD.jsonl (debug log; see Settings → Debug log)
 └── config.toml         # User preferences
 ```
+
+## Backing up your library
+
+Everything Sample Curator persists lives under `~/.music-hub-data/`, so a single
+folder is the entire backup target. Pick whichever option fits your existing setup.
+
+### Time Machine (recommended on macOS)
+
+Time Machine backs up your home directory by default — `~/.music-hub-data/` is
+already included. To verify it isn't excluded:
+
+1. Open **System Settings → General → Time Machine → Options…**
+2. Confirm `~/.music-hub-data` (or any parent) is **not** in the "Exclude these
+   items" list.
+
+### Off-site rsync (optional)
+
+If you keep a separate off-site disk, mirror the folder with `rsync`:
+
+```bash
+rsync -av --delete ~/.music-hub-data/ /Volumes/MyBackup/music-hub-data/
+```
+
+`-a` preserves timestamps and permissions; `--delete` keeps the mirror
+identical (drop it if you'd rather retain deleted samples). Run it on a cron
+schedule or before any major library reorganisation. The SQLite database
+(`sample-library/library.db`) copies cleanly while the app is closed; if the
+app may be running, prefer Time Machine or stop the app first to avoid
+copying a half-flushed write.
 
 ## Python Sidecar
 

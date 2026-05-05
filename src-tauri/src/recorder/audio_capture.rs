@@ -274,6 +274,12 @@ impl RecorderState {
             stem_separation_enabled: false,
         };
         *guard = Some(session.clone());
+        // vault-259a: structured telemetry for arm cycle.
+        crate::telemetry::log_event(
+            crate::telemetry::EventCategory::Arm,
+            "arm-on",
+            serde_json::json!({ "session_tag": session.session_tag }),
+        );
         Ok(session)
     }
 
@@ -282,7 +288,13 @@ impl RecorderState {
     /// arm cycle leaves no trace.
     pub fn disarm_session(&self) -> Result<(), String> {
         let mut guard = self.current_session.lock().map_err(|e| e.to_string())?;
+        let prior_tag = guard.as_ref().map(|s| s.session_tag.clone());
         *guard = None;
+        crate::telemetry::log_event(
+            crate::telemetry::EventCategory::Arm,
+            "arm-off",
+            serde_json::json!({ "session_tag": prior_tag }),
+        );
         Ok(())
     }
 

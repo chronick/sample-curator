@@ -5,6 +5,7 @@ import { RANKED_MODELS, type OllamaStatusDict } from "../types/ollama";
 import type { SearchStats } from "../api/types";
 
 import type { OrphanedRecording } from "./OrphanedRecordingsDialog";
+import { DebugLogPanel } from "./settings/DebugLogPanel";
 
 interface SettingsDialogProps {
   onClose: () => void;
@@ -234,6 +235,9 @@ export function SettingsDialog({ onClose, llmStatus, onRefreshLlm, onSetLlmModel
               <p className="mt-2 text-xs text-gray-400">{orphanScanResult}</p>
             )}
           </section>
+
+          {/* Debug log (vault-259a) */}
+          <DebugLogPanel />
 
           {/* Library Info */}
           <section>
