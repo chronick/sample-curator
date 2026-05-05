@@ -13,6 +13,7 @@ mod db_commands;
 mod duplicates;
 mod import_commands;
 mod jobs;
+mod orphans;
 mod projects;
 mod recorder;
 mod search;
@@ -229,6 +230,39 @@ fn recorder_get_config(state: State<'_, RecorderConfigState>) -> Result<recorder
 #[tauri::command]
 fn recorder_set_config(config: recorder::config::RecorderConfig, state: State<'_, RecorderConfigState>) -> Result<(), String> {
     state.set(config)
+}
+
+// Arm-cycle session lifecycle. The frontend's arm toggle drives backend
+// session state via `recorder_set_armed`; downstream session_* commands
+// read/mutate that ephemeral context.
+
+#[tauri::command]
+fn recorder_set_armed(
+    armed: bool,
+    state: State<'_, RecorderState>,
+) -> Result<Option<recorder::audio_capture::CurrentSessionContext>, String> {
+    if armed {
+        let session = state.arm_session()?;
+        Ok(Some(session))
+    } else {
+        state.disarm_session()?;
+        Ok(None)
+    }
+}
+
+#[tauri::command]
+fn session_current(
+    state: State<'_, RecorderState>,
+) -> Result<Option<recorder::audio_capture::CurrentSessionContext>, String> {
+    state.session_snapshot()
+}
+
+#[tauri::command]
+fn session_set_stem_separation(
+    enabled: bool,
+    state: State<'_, RecorderState>,
+) -> Result<(), String> {
+    state.set_stem_separation(enabled)
 }
 
 #[derive(serde::Serialize)]
@@ -502,6 +536,8 @@ fn main() {
             db_commands::db_update_filter_preset,
             db_commands::db_delete_filter_preset,
             db_commands::db_migrate_types_to_tags,
+            db_commands::session_list,
+            db_commands::session_get,
             db_commands::list_directory,
             db_commands::get_browse_roots,
             // Import pipeline
@@ -569,7 +605,14 @@ fn main() {
             recorder_open_recordings_dir,
             recorder_get_config,
             recorder_set_config,
+            recorder_set_armed,
+            session_current,
+            session_set_stem_separation,
             recorder_save_to_library,
+            // Orphan recording recovery
+            orphans::scan_orphaned_recordings,
+            orphans::delete_orphaned_recording,
+            orphans::import_orphaned_recording,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
