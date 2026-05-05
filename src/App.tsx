@@ -30,6 +30,7 @@ import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { JobProgressBar } from "./components/JobProgressBar";
 import { JobsPanel } from "./components/JobsPanel";
 import { RecorderPanel } from "./components/recorder";
+import { SessionsPanel } from "./components/SessionsPanel";
 import { useJobs } from "./hooks/useJobs";
 import { api } from "./api/client";
 import type { SearchFilters, ViewMode } from "./api/types";
@@ -293,7 +294,7 @@ function AppContent() {
       {/* Main content */}
       <div className="flex flex-1 overflow-hidden">
         {/* Left sidebar: File Browser */}
-        {showLeft && activeView !== "record" && (
+        {showLeft && activeView !== "record" && activeView !== "sessions" && (
           <>
             <aside
               style={{ width: leftWidth }}
@@ -537,6 +538,8 @@ function AppContent() {
             <JobsPanel />
           ) : activeView === "record" ? (
             <RecorderPanel />
+          ) : activeView === "sessions" ? (
+            <SessionsPanel />
           ) : null}
         </main>
 

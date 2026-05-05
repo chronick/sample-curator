@@ -1,6 +1,6 @@
 import type { OllamaStatusDict } from "../types/ollama";
 
-type ActiveView = "browse" | "jobs" | "record";
+type ActiveView = "browse" | "jobs" | "record" | "sessions";
 
 interface HeaderBarProps {
   activeView: ActiveView;
@@ -82,6 +82,16 @@ export function HeaderBar({
             }`}
           >
             Browse
+          </button>
+          <button
+            onClick={() => onSetActiveView("sessions")}
+            className={`px-3 py-1 text-xs font-medium transition-colors border-l border-surface-border ${
+              activeView === "sessions"
+                ? "bg-accent/20 text-accent"
+                : "hover:bg-surface-hover text-gray-400"
+            }`}
+          >
+            Sessions
           </button>
           <button
             onClick={() => onSetActiveView("jobs")}

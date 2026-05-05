@@ -17,7 +17,7 @@ interface KeyboardShortcutsConfig {
   viewMode: ViewMode;
   tabs: Tab[];
   activeTabId: string;
-  activeView: "browse" | "jobs" | "record";
+  activeView: "browse" | "jobs" | "record" | "sessions";
 
   // Actions
   play: (path: string) => void;
@@ -36,7 +36,7 @@ interface KeyboardShortcutsConfig {
   setShowPlayer: (fn: (v: boolean) => boolean) => void;
   setShowImport: (v: boolean) => void;
   setRightPanelMode: (mode: "details" | "similar" | "projects" | "duplicates") => void;
-  setActiveView: (view: "browse" | "jobs") => void;
+  setActiveView: (view: "browse" | "jobs" | "sessions") => void;
 }
 
 export function useKeyboardShortcuts(config: KeyboardShortcutsConfig) {

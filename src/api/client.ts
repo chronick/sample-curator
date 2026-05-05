@@ -212,6 +212,31 @@ export const api = {
   },
 
   /**
+   * List all recording sessions, derived from `session:*` tags. Each row
+   * carries a derived human-readable name, first/last clip timestamps,
+   * and clip count, ordered desc by first_clip_at.
+   */
+  async sessionList(): Promise<SessionSummary[]> {
+    return invoke<SessionSummary[]>("session_list");
+  },
+
+  /**
+   * Get all clips associated with a given session tag.
+   */
+  async sessionGet(sessionTag: string): Promise<Sample[]> {
+    return invoke<Sample[]>("session_get", { sessionTag });
+  },
+
+  /**
+   * Snapshot of the active arm-cycle session, or null when disarmed.
+   * Used to render the in-progress placeholder when the user has armed
+   * but no clips have crossed threshold yet.
+   */
+  async sessionCurrent(): Promise<CurrentSessionContext | null> {
+    return invoke<CurrentSessionContext | null>("session_current");
+  },
+
+  /**
    * Add tags to a sample.
    */
   async addTags(sampleId: number, tags: string[]): Promise<Sample> {
@@ -471,6 +496,31 @@ export interface JobStatusResponse {
     failed: number;
   };
   worker_running: boolean;
+}
+
+/**
+ * Aggregate row for a recording session (one per `session:*` tag).
+ * Timestamps are raw SQLite UTC strings ("YYYY-MM-DD HH:MM:SS").
+ * `derived_name` is rendered in the user's local timezone by the
+ * backend ("session at YYYY-MM-DD HH:MM"); used as the display label
+ * until rename UI lands (vault-fsop / T2-followup).
+ */
+export interface SessionSummary {
+  session_tag: string;
+  derived_name: string;
+  first_clip_at: string;
+  last_clip_at: string;
+  clip_count: number;
+}
+
+/**
+ * Snapshot of the active arm-cycle session (mirror of the Rust
+ * `CurrentSessionContext`). `started_at` is an ISO 8601 UTC string.
+ */
+export interface CurrentSessionContext {
+  session_tag: string;
+  started_at: string;
+  stem_separation_enabled: boolean;
 }
 
 export default api;
