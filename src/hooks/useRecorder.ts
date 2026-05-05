@@ -196,6 +196,7 @@ export function useRecorder() {
       invoke<SaveResult>("recorder_save_to_library", {
         path: info.path,
         tags: ["recorded"],
+        sessionTag: info.session_tag,
       })
         .then((result) => {
           const s = useRecorderStore.getState();

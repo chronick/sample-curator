@@ -294,10 +294,19 @@ struct RecorderSaveResult {
     naming_alternative_method: Option<String>,
 }
 
+/// Save a finalized recording to the library, applying any session_tag
+/// the frontend captured at stop_recording time.
+///
+/// `session_tag` is a snapshot of `RecorderState.current_session.session_tag`
+/// taken at stop time and threaded back through the frontend. Reading the
+/// live `current_session` here would be unsafe — the user may have disarmed
+/// during the async writer-finalize → save_to_library window. `None` for
+/// manual (un-armed) recordings.
 #[tauri::command]
 fn recorder_save_to_library(
     path: String,
     tags: Vec<String>,
+    session_tag: Option<String>,
     state: State<'_, DbState>,
     recorder_state: State<'_, RecorderState>,
     app_state: State<'_, AppState>,
@@ -368,6 +377,15 @@ fn recorder_save_to_library(
 
     // Always add "recorded" tag
     let _ = db.add_tag_to_sample(sample_id, "recorded");
+
+    // Apply the snapshotted session_tag, if this clip was captured during
+    // an armed cycle. Lazy tag-row creation lives in `add_tag_to_sample`
+    // (no parallel helper). 0-clip arm cycles never reach this code, so
+    // the `tags` table stays clean of stray `session:*` rows.
+    if let Some(ref tag) = session_tag {
+        db.add_tag_to_sample(sample_id, tag)
+            .map_err(|e| e.to_string())?;
+    }
 
     let pack_name = pack_id.and_then(|pid| {
         db.get_pack(pid).ok().flatten().map(|p| p.name)

@@ -46,6 +46,13 @@ pub struct RecordingInfo {
     pub sample_rate: u32,
     pub channels: u16,
     pub bit_depth: u16,
+    /// Snapshot of the current arm-cycle session_tag at stop time. The
+    /// frontend threads this back through `recorder_save_to_library` so
+    /// that disarming before save does not strip the tag — the live
+    /// `current_session` may already be cleared by then. `None` when the
+    /// recording was started outside an armed cycle (manual record).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_tag: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -781,6 +788,16 @@ pub fn stop_recording(state: &RecorderState) -> Result<RecordingInfo, String> {
             .unwrap_or((48000, 2, 24))
     };
 
+    // Snapshot the active arm-cycle session_tag now, before the user has a
+    // chance to disarm (which would clear `current_session`). The frontend
+    // threads this back through `recorder_save_to_library`.
+    let session_tag = state
+        .current_session
+        .lock()
+        .map_err(|e| e.to_string())?
+        .as_ref()
+        .map(|s| s.session_tag.clone());
+
     // Join writer thread on a background thread — don't block IPC
     let writer_finalized = Arc::clone(&state.writer_finalized);
     let handle = {
@@ -808,6 +825,7 @@ pub fn stop_recording(state: &RecorderState) -> Result<RecordingInfo, String> {
         sample_rate,
         channels,
         bit_depth,
+        session_tag,
     })
 }
 
@@ -1021,5 +1039,88 @@ mod tests {
         let state = RecorderState::new();
         let err = state.set_stem_separation(true).unwrap_err();
         assert!(err.contains("not armed"));
+    }
+
+    // ---- session_tag snapshot semantics (vault-34ut / T2b) ----
+    //
+    // These exercise the snapshot-on-stop pattern directly against the
+    // public surface (`session_snapshot()` mirrors what `stop_recording`
+    // reads). The actual `stop_recording` body cannot run in unit tests
+    // because it owns the cpal stream + writer thread lifecycle; we
+    // validate the snapshot read-path here and the library-side tag
+    // application via the live save_to_library integration.
+
+    #[test]
+    fn snapshot_captures_tag_during_armed_cycle() {
+        // Mirrors the read pattern in `stop_recording`: clone the
+        // session_tag out of the live mutex while armed.
+        let state = RecorderState::new();
+        let session = state.arm_session().unwrap();
+        let snapshot = state
+            .current_session
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|s| s.session_tag.clone());
+        assert_eq!(snapshot, Some(session.session_tag));
+    }
+
+    #[test]
+    fn snapshot_survives_concurrent_disarm() {
+        // The race we're guarding: disarm clears `current_session` to
+        // None, but the cloned snapshot must remain intact.
+        let state = RecorderState::new();
+        state.arm_session().unwrap();
+        let snapshot = state
+            .current_session
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|s| s.session_tag.clone());
+        state.disarm_session().unwrap();
+        assert!(state.session_snapshot().unwrap().is_none());
+        // Snapshot string is independent of the mutex contents.
+        assert!(snapshot.is_some());
+        assert!(snapshot.as_ref().unwrap().starts_with("session:"));
+    }
+
+    #[test]
+    fn snapshot_isolates_concurrent_arm_cycles() {
+        // Cycle A: arm, snapshot, disarm. Cycle B: re-arm with a fresh
+        // UUID. Cycle A's snapshot is unaffected.
+        let state = RecorderState::new();
+        state.arm_session().unwrap();
+        let snapshot_a = state
+            .current_session
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|s| s.session_tag.clone())
+            .unwrap();
+        state.disarm_session().unwrap();
+        let session_b = state.arm_session().unwrap();
+        let snapshot_b = state
+            .current_session
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|s| s.session_tag.clone())
+            .unwrap();
+        assert_eq!(snapshot_b, session_b.session_tag);
+        assert_ne!(snapshot_a, snapshot_b);
+    }
+
+    #[test]
+    fn snapshot_is_none_when_unarmed_recording() {
+        // Manual recording (no arm cycle): the snapshot read must be None
+        // so save_to_library doesn't apply a stray session_tag.
+        let state = RecorderState::new();
+        let snapshot = state
+            .current_session
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|s| s.session_tag.clone());
+        assert!(snapshot.is_none());
     }
 }

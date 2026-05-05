@@ -242,6 +242,7 @@ describe("useRecorder", () => {
       sample_rate: 48000,
       channels: 2,
       bit_depth: 24,
+      session_tag: "session:00000000-0000-4000-8000-000000000001",
     };
     const mockSaveResult = {
       sample_id: 42,
@@ -269,9 +270,13 @@ describe("useRecorder", () => {
     });
 
     expect(mockInvoke).toHaveBeenCalledWith("recorder_stop_recording");
+    // sessionTag from RecordingInfo is forwarded so the backend can apply
+    // the session:<UUID> tag even if the user disarms during the
+    // writer-finalize → save_to_library window.
     expect(mockInvoke).toHaveBeenCalledWith("recorder_save_to_library", {
       path: "/recordings/session-001.wav",
       tags: ["recorded"],
+      sessionTag: "session:00000000-0000-4000-8000-000000000001",
     });
     expect(store.setRecordingState).toHaveBeenCalledWith(false);
     expect(store.setElapsedTime).toHaveBeenCalledWith(0);
