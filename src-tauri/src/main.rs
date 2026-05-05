@@ -19,6 +19,7 @@ mod recorder;
 mod search;
 mod sidecar;
 mod split;
+mod transforms;
 mod watch;
 
 use audio::AudioState;

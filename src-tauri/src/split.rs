@@ -37,6 +37,7 @@ use sample_library_core::db::Database;
 
 use crate::db_commands::{execute_delete_sample, DbState};
 use crate::recorder::naming::heroku_style_stem;
+use crate::transforms::ParentInheritance;
 
 /// Modes available to v1 of the split flow.
 ///
@@ -288,15 +289,10 @@ fn split_one_sample(
         return Ok(0);
     }
 
-    // Inherit session_tag from parent's tags (if any). Manual recordings
-    // that predate T2b won't have one — that's correct, not a bug.
-    let parent_tags = db
-        .get_sample_tags(source.id)
-        .map_err(|e| format!("Failed to read parent tags: {}", e))?;
-    let session_tag: Option<String> = parent_tags
-        .iter()
-        .find(|t| t.name.starts_with("session:"))
-        .map(|t| t.name.clone());
+    // Snapshot inheritance-relevant tags from the parent before the
+    // per-chunk loop. Manual recordings that predate T2b won't carry a
+    // session:* — `apply` is a no-op for that piece, which is correct.
+    let inheritance = ParentInheritance::snapshot(db, source.id)?;
 
     let parent_path = PathBuf::from(&source.path);
     let parent_dir = parent_path.parent().map(|p| p.to_path_buf()).unwrap_or_default();
@@ -345,13 +341,13 @@ fn split_one_sample(
             }
         };
 
-        // Tags. Order matters less than completeness — the same tag
-        // applied twice is a no-op via `INSERT OR IGNORE` semantics.
-        let _ = db.add_tag_to_sample(new_id, "recorded");
-        let _ = db.add_tag_to_sample(new_id, &format!("parent:{}", source.id));
-        if let Some(ref tag) = session_tag {
-            let _ = db.add_tag_to_sample(new_id, tag);
-        }
+        // parent:<id> + inherited session:* + transform-specific tags.
+        // `recorded` here flags the chunk as the same kind of content
+        // as the source (the canonical split target is a recording).
+        // Splitting an imported sample would still tag chunks with
+        // `recorded`, which is wrong for that case but consistent with
+        // the v1 spec; revisit once we have non-recording sources.
+        inheritance.apply(db, new_id, &["recorded"]);
 
         written += 1;
     }
