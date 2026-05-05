@@ -27,7 +27,6 @@ pub enum AnalysisPipeline {
 /// Result of running analysis on a sample.
 #[derive(Debug, Clone)]
 pub struct AnalysisResult {
-    pub analyzed: bool,
     pub errors: Vec<String>,
 }
 
@@ -120,16 +119,10 @@ fn run_standard(db: &Database, sample_id: i64, file_path: &str) -> AnalysisResul
         None, // applicability_score
     ) {
         errors.push(format!("DB update: {}", e));
-        return AnalysisResult {
-            analyzed: false,
-            errors,
-        };
+        return AnalysisResult { errors };
     }
 
-    AnalysisResult {
-        analyzed: true,
-        errors,
-    }
+    AnalysisResult { errors }
 }
 
 #[cfg(test)]

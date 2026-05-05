@@ -135,8 +135,6 @@ pub struct SimilaritySearch {
     id_to_position: HashMap<i64, u64>,
     /// Next available position in the index.
     next_position: u64,
-    /// Index file path (if persisted).
-    index_path: Option<String>,
 }
 
 impl SimilaritySearch {
@@ -160,7 +158,6 @@ impl SimilaritySearch {
             position_to_id: HashMap::new(),
             id_to_position: HashMap::new(),
             next_position: 0,
-            index_path: None,
         })
     }
 
@@ -193,7 +190,6 @@ impl SimilaritySearch {
             position_to_id: HashMap::new(),
             id_to_position: HashMap::new(),
             next_position: 0,
-            index_path: Some(path_str),
         })
     }
 

@@ -22,7 +22,7 @@ impl DbState {
         }
     }
 
-    pub fn get_db(&self) -> Result<std::sync::MutexGuard<Option<Database>>, String> {
+    pub fn get_db(&self) -> Result<std::sync::MutexGuard<'_, Option<Database>>, String> {
         let mut guard = self.db.lock().map_err(|e| e.to_string())?;
 
         if guard.is_none() {
@@ -100,6 +100,9 @@ pub struct SampleUpdates {
     pub key: Option<String>,
     pub quality_score: Option<f64>,
     pub applicability_score: Option<f64>,
+    /// Wired into the API but currently dropped silently — see vault-1dvb
+    /// for the missing SQL UPDATE branch.
+    #[allow(dead_code)]
     pub description: Option<String>,
 }
 
@@ -149,8 +152,10 @@ fn enrich_sample(db: &Database, sample: Sample) -> Result<SampleResponse, String
 
 // ============ Tauri Commands ============
 
-/// Validate a sort field against the allowlist.
-pub(crate) fn validate_sort_field(field: &str) -> bool {
+/// Validate a sort field against the allowlist (test-only — production
+/// callers compare against `SORT_ALLOWLIST` inline).
+#[cfg(test)]
+fn validate_sort_field(field: &str) -> bool {
     SORT_ALLOWLIST.contains(&field)
 }
 

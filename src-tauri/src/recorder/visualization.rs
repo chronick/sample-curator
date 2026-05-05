@@ -132,6 +132,10 @@ pub fn compute_spectral_centroid(segment: &[f32], sample_rate: u32) -> f32 {
 }
 
 /// Compute recording waveform data: peak amplitude + spectral centroid per bar.
+///
+/// Tested but not yet wired into the live recorder pipeline — kept for
+/// the planned post-recording waveform render pass.
+#[allow(dead_code)]
 pub fn compute_recording_waveform(
     mono: &[f32],
     sample_rate: u32,

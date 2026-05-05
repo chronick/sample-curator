@@ -2,7 +2,7 @@
 //!
 //! Provides UI for viewing and resolving duplicate samples.
 
-use sample_library_core::db::{Database, Sample};
+use sample_library_core::db::Database;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -20,7 +20,7 @@ impl DuplicateState {
         }
     }
 
-    fn get_db(&self) -> Result<std::sync::MutexGuard<Option<Database>>, String> {
+    fn get_db(&self) -> Result<std::sync::MutexGuard<'_, Option<Database>>, String> {
         let mut guard = self.db.lock().map_err(|e| e.to_string())?;
 
         if guard.is_none() {

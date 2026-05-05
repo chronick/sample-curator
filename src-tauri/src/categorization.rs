@@ -6,7 +6,6 @@ use sample_library_core::{
     categorization::{categorize_sample, suggest_sample_type, AcousticTags},
     db::Database,
 };
-use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::State;
@@ -23,7 +22,7 @@ impl CategorizationState {
         }
     }
 
-    fn get_db(&self) -> Result<std::sync::MutexGuard<Option<Database>>, String> {
+    fn get_db(&self) -> Result<std::sync::MutexGuard<'_, Option<Database>>, String> {
         let mut guard = self.db.lock().map_err(|e| e.to_string())?;
 
         if guard.is_none() {

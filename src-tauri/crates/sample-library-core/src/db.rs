@@ -3,7 +3,7 @@
 //! Provides a thin wrapper around rusqlite for sample library operations.
 //! Compatible with the Python SQLAlchemy models in sample-library.
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
 use std::path::Path;

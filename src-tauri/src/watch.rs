@@ -13,7 +13,6 @@ use tauri::State;
 /// State for watch operations.
 pub struct WatchState {
     watcher: Mutex<Option<FolderWatcher>>,
-    db: Mutex<Option<Database>>,
     watched_dirs: Mutex<Vec<String>>,
 }
 
@@ -21,22 +20,8 @@ impl WatchState {
     pub fn new() -> Self {
         Self {
             watcher: Mutex::new(None),
-            db: Mutex::new(None),
             watched_dirs: Mutex::new(Vec::new()),
         }
-    }
-
-    /// Get or initialize the database.
-    fn get_db(&self) -> Result<std::sync::MutexGuard<Option<Database>>, String> {
-        let mut guard = self.db.lock().map_err(|e| e.to_string())?;
-
-        if guard.is_none() {
-            let db_path = get_db_path()?;
-            let db = Database::open(&db_path).map_err(|e| e.to_string())?;
-            *guard = Some(db);
-        }
-
-        Ok(guard)
     }
 }
 

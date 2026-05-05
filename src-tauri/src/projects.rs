@@ -25,7 +25,7 @@ impl ProjectState {
     }
 
     /// Get or initialize the database.
-    fn get_db(&self) -> Result<std::sync::MutexGuard<Option<Database>>, String> {
+    fn get_db(&self) -> Result<std::sync::MutexGuard<'_, Option<Database>>, String> {
         let mut guard = self.db.lock().map_err(|e| e.to_string())?;
 
         if guard.is_none() {

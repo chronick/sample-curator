@@ -304,11 +304,6 @@ fn run_import(
     }
 }
 
-/// Detect pack name (public for testing).
-pub(crate) fn detect_pack_name_testable(file_path: &Path, import_root: &Path) -> Option<(String, String)> {
-    detect_pack_name(file_path, import_root)
-}
-
 /// Run analysis on a single sample and update the database.
 /// Delegates to the shared analysis pipeline dispatcher.
 fn run_analysis(
