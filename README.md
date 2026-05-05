@@ -117,6 +117,55 @@ npm run tauri:build
 
 Output will be in `src-tauri/target/release/bundle/`.
 
+## Releases (prod app + auto-update)
+
+The prod app installs alongside the dev build (different macOS bundle identifier) and auto-updates from GitHub Releases.
+
+### One-time keypair setup
+
+Updates are signed with a Tauri-specific keypair (independent of Apple Developer ID). Generate it once on a trusted local machine:
+
+```bash
+npx tauri signer generate -w ~/.tauri/sample-curator.key
+```
+
+The command prints a **public key** (paste into `src-tauri/tauri.conf.json` under `plugins.updater.pubkey`) and a **private key** (file `~/.tauri/sample-curator.key`, plus the password you chose). Keep both safe — losing the private key means existing installs can't accept future updates.
+
+Set the private key + password as repo secrets:
+
+```bash
+gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/sample-curator.key
+gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD --body "<password>"
+```
+
+### Cutting a release
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The `Release` workflow builds a universal `.dmg` on a macOS runner, signs the updater bundle with the Tauri key, and publishes a **draft** GitHub Release with `latest.json` + `.dmg` attached. Review the draft, then publish — installed prod apps poll `releases/latest/download/latest.json` and will offer the update.
+
+### First-launch Gatekeeper warning (Apple-unsigned)
+
+Builds are not yet signed with an Apple Developer ID, so Gatekeeper will refuse to open the `.dmg` on a fresh Mac. Workaround:
+
+```bash
+xattr -d com.apple.quarantine /Applications/Sample\ Curator.app
+```
+
+After that the app launches normally. (Apple Developer ID signing is tracked separately in vault-h9il.)
+
+### Dev / prod coexistence
+
+| Build | Identifier | Bundle name | Updater |
+|-------|------------|-------------|---------|
+| Dev (`npm start`) | `com.music-hub.sample-curator.dev` | `Sample Curator (Dev)` | disabled |
+| Prod (release) | `com.music-hub.sample-curator` | `Sample Curator` | enabled |
+
+Both share `~/.music-hub-data/` (library DB + recordings) and have isolated app config / window state under `~/Library/Application Support/<identifier>/`.
+
 ## Configuration
 
 The app stores data in `~/.music-hub-data/`:
