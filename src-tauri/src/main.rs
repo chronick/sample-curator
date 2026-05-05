@@ -501,6 +501,8 @@ fn main() {
             db_commands::db_update_filter_preset,
             db_commands::db_delete_filter_preset,
             db_commands::db_migrate_types_to_tags,
+            db_commands::session_list,
+            db_commands::session_get,
             db_commands::list_directory,
             db_commands::get_browse_roots,
             // Import pipeline

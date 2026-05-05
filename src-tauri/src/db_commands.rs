@@ -3,6 +3,7 @@
 //! Replaces the Python sidecar's DB handlers with native Rust commands
 //! that operate directly on sample-library-core's Database.
 
+use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
 use sample_library_core::db::{Database, Pack, Sample};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -898,6 +899,124 @@ pub fn db_migrate_types_to_tags(state: State<'_, DbState>) -> Result<usize, Stri
     db.migrate_types_to_tags().map_err(|e| e.to_string())
 }
 
+// ============ Session Commands ============
+
+/// Aggregate row for a recording session, derived from `session:*` tags.
+#[derive(Debug, Clone, Serialize)]
+pub struct SessionSummary {
+    pub session_tag: String,
+    pub derived_name: String,
+    pub first_clip_at: String,
+    pub last_clip_at: String,
+    pub clip_count: i64,
+}
+
+/// Parse a SQLite timestamp into a UTC DateTime.
+///
+/// SQLite's `CURRENT_TIMESTAMP` writes ISO-ish strings like
+/// `"2026-05-04 19:30:12"` (no timezone, implicitly UTC). Test fixtures
+/// may also write fractional seconds or trailing `Z`. Falls back to
+/// returning `None` if nothing parses, in which case the raw string is
+/// used as the derived name.
+fn parse_db_timestamp(raw: &str) -> Option<DateTime<Utc>> {
+    let trimmed = raw.trim_end_matches('Z');
+
+    let formats = [
+        "%Y-%m-%d %H:%M:%S%.f",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S%.f",
+        "%Y-%m-%dT%H:%M:%S",
+    ];
+    for fmt in formats {
+        if let Ok(naive) = NaiveDateTime::parse_from_str(trimmed, fmt) {
+            return Some(Utc.from_utc_datetime(&naive));
+        }
+    }
+    None
+}
+
+/// Format a session's first-clip timestamp as a human-readable name in
+/// the user's local timezone, e.g. `"session at 2026-05-04 19:30"`.
+pub(crate) fn derive_session_name(first_clip_at: &str) -> String {
+    match parse_db_timestamp(first_clip_at) {
+        Some(utc) => {
+            let local: DateTime<Local> = utc.with_timezone(&Local);
+            format!("session at {}", local.format("%Y-%m-%d %H:%M"))
+        }
+        None => format!("session at {}", first_clip_at),
+    }
+}
+
+/// Execute the session_list query (testable without Tauri State).
+///
+/// Delegates the SQL aggregation to `Database::list_session_aggregates`
+/// (lives in sample-library-core, fully unit-tested there) and just
+/// adds the timezone-aware `derived_name` field on top.
+pub(crate) fn execute_session_list(db: &Database) -> Result<Vec<SessionSummary>, String> {
+    let aggregates = db
+        .list_session_aggregates()
+        .map_err(|e| e.to_string())?;
+    Ok(aggregates
+        .into_iter()
+        .map(|a| {
+            let derived_name = derive_session_name(&a.first_clip_at);
+            SessionSummary {
+                session_tag: a.session_tag,
+                derived_name,
+                first_clip_at: a.first_clip_at,
+                last_clip_at: a.last_clip_at,
+                clip_count: a.clip_count,
+            }
+        })
+        .collect())
+}
+
+/// Execute session_get (testable without Tauri State).
+///
+/// Thin wrapper around the existing tag-filtered `execute_search` so
+/// session results stay consistent with the rest of the search surface
+/// (same enrichment, same ordering rules).
+pub(crate) fn execute_session_get(
+    db: &Database,
+    session_tag: &str,
+) -> Result<Vec<SampleResponse>, String> {
+    let filters = SearchFiltersInput {
+        query: None,
+        tags: Some(vec![session_tag.to_string()]),
+        pack_id: None,
+        min_score: None,
+        max_score: None,
+        sample_type: None,
+        min_bpm: None,
+        max_bpm: None,
+        sort_field: Some("created_at".to_string()),
+        sort_direction: Some("asc".to_string()),
+        limit: Some(i64::MAX),
+        offset: None,
+    };
+    let result = execute_search(db, &filters)?;
+    Ok(result.samples)
+}
+
+/// List recording sessions derived from `session:*` tags.
+#[tauri::command]
+pub fn session_list(state: State<'_, DbState>) -> Result<Vec<SessionSummary>, String> {
+    let db_guard = state.get_db()?;
+    let db = db_guard.as_ref().ok_or("Database not initialized")?;
+    execute_session_list(db)
+}
+
+/// Return the clips associated with a given session tag.
+#[tauri::command]
+pub fn session_get(
+    session_tag: String,
+    state: State<'_, DbState>,
+) -> Result<Vec<SampleResponse>, String> {
+    let db_guard = state.get_db()?;
+    let db = db_guard.as_ref().ok_or("Database not initialized")?;
+    execute_session_get(db, &session_tag)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1225,5 +1344,121 @@ mod tests {
             let tags: Vec<String> = db.get_sample_tags(*id).unwrap().into_iter().map(|t| t.name).collect();
             assert!(tags.contains(&"live-ready".to_string()));
         }
+    }
+
+    // ============ Session command tests ============
+    //
+    // The SQL aggregation, ordering, exclusion of non-session tags, and
+    // EXPLAIN QUERY PLAN coverage all live in the sample-library-core
+    // tests for `list_session_aggregates`. The tests here cover only
+    // the Tauri-layer responsibilities: timezone-aware `derived_name`
+    // formatting and the `session_get` thin-wrapper behavior over
+    // `execute_search`.
+
+    fn insert_sample_with_session(
+        db: &Database,
+        path: &str,
+        session_tag: &str,
+        created_at: &str,
+    ) -> i64 {
+        let conn = db.connection();
+        conn.execute(
+            "INSERT INTO samples (path, source_type, sample_type, created_at) VALUES (?1, 'imported', 'kick', ?2)",
+            rusqlite::params![path, created_at],
+        )
+        .expect("insert sample");
+        let id = conn.last_insert_rowid();
+        db.add_tag_to_sample(id, session_tag).expect("tag sample");
+        id
+    }
+
+    #[test]
+    fn test_derived_name_format() {
+        // derive_session_name parses the SQLite UTC timestamp and renders
+        // it in the test process's local timezone. We can't predict that
+        // timezone, so we assert against the expected local rendering.
+        let raw = "2026-05-04 19:30:12";
+        let utc = parse_db_timestamp(raw).expect("parse");
+        let local: DateTime<Local> = utc.with_timezone(&Local);
+        let expected = format!("session at {}", local.format("%Y-%m-%d %H:%M"));
+        assert_eq!(derive_session_name(raw), expected);
+        let derived = derive_session_name(raw);
+        assert!(derived.starts_with("session at "));
+        assert_eq!(
+            derived.len(),
+            "session at YYYY-MM-DD HH:MM".len(),
+            "derived: {:?}",
+            derived
+        );
+    }
+
+    #[test]
+    fn test_derived_name_handles_fractional_seconds() {
+        let raw = "2026-05-04 19:30:12.345";
+        let derived = derive_session_name(raw);
+        assert!(derived.starts_with("session at "));
+        assert_eq!(derived.len(), "session at YYYY-MM-DD HH:MM".len());
+    }
+
+    #[test]
+    fn test_derived_name_falls_back_for_unparsable() {
+        let raw = "garbage-not-a-timestamp";
+        // Falls back to embedding the raw string rather than panicking.
+        assert_eq!(derive_session_name(raw), "session at garbage-not-a-timestamp");
+    }
+
+    #[test]
+    fn test_session_list_attaches_derived_name() {
+        // Composes execute_session_list = list_session_aggregates + derive_session_name.
+        let db = Database::open_in_memory().expect("open in-memory db");
+        insert_sample_with_session(&db, "/s/a.wav", "session:foo", "2026-05-04 10:00:00");
+
+        let summaries = execute_session_list(&db).expect("session_list");
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].session_tag, "session:foo");
+        assert_eq!(summaries[0].clip_count, 1);
+        // derived_name follows the local-time format defined above.
+        let expected = derive_session_name(&summaries[0].first_clip_at);
+        assert_eq!(summaries[0].derived_name, expected);
+        assert!(summaries[0].derived_name.starts_with("session at "));
+    }
+
+    #[test]
+    fn test_session_get_returns_only_tagged_clips() {
+        let db = Database::open_in_memory().expect("open in-memory db");
+        let id_a =
+            insert_sample_with_session(&db, "/s/a.wav", "session:foo", "2026-05-04 10:00:00");
+        let id_b =
+            insert_sample_with_session(&db, "/s/b.wav", "session:foo", "2026-05-04 10:01:00");
+        // A clip in a different session — should NOT come back.
+        let _id_c =
+            insert_sample_with_session(&db, "/s/c.wav", "session:bar", "2026-05-04 10:02:00");
+
+        let clips = execute_session_get(&db, "session:foo").expect("session_get");
+        let returned: Vec<i64> = clips.iter().map(|s| s.sample.id).collect();
+        assert_eq!(clips.len(), 2);
+        assert!(returned.contains(&id_a));
+        assert!(returned.contains(&id_b));
+    }
+
+    #[test]
+    fn test_session_get_nonexistent_returns_empty_vec() {
+        let db = Database::open_in_memory().expect("open in-memory db");
+        insert_sample_with_session(&db, "/s/a.wav", "session:foo", "2026-05-04 10:00:00");
+
+        let clips = execute_session_get(&db, "session:does-not-exist").expect("session_get");
+        assert!(clips.is_empty());
+    }
+
+    #[test]
+    fn test_session_get_session_tag_in_returned_tags() {
+        // Returned SampleResponse must include the session tag in its
+        // tag list (so the frontend can render it).
+        let db = Database::open_in_memory().expect("open in-memory db");
+        insert_sample_with_session(&db, "/s/a.wav", "session:foo", "2026-05-04 10:00:00");
+
+        let clips = execute_session_get(&db, "session:foo").expect("session_get");
+        assert_eq!(clips.len(), 1);
+        assert!(clips[0].tags.contains(&"session:foo".to_string()));
     }
 }
