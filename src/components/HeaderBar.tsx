@@ -8,6 +8,7 @@ interface HeaderBarProps {
   showRight: boolean;
   showPlayer: boolean;
   llmStatus: OllamaStatusDict;
+  appVersion?: string;
   onSetActiveView: (view: ActiveView) => void;
   onToggleLeft: () => void;
   onToggleRight: () => void;
@@ -49,6 +50,7 @@ export function HeaderBar({
   showRight,
   showPlayer,
   llmStatus,
+  appVersion,
   onSetActiveView,
   onToggleLeft,
   onToggleRight,
@@ -60,7 +62,17 @@ export function HeaderBar({
   return (
     <header className="flex items-center justify-between px-4 py-2 border-b border-surface-border bg-surface-raised">
       <div className="flex items-center gap-3">
-        <h1 className="text-lg font-semibold">Sample Curator</h1>
+        <h1 className="text-lg font-semibold">
+          Sample Curator
+          {appVersion && (
+            <span
+              className="ml-2 text-xs font-normal text-gray-500 tabular-nums"
+              data-testid="app-version"
+            >
+              v{appVersion}
+            </span>
+          )}
+        </h1>
         {/* Top-level view tabs */}
         <div className="flex items-center border border-surface-border rounded overflow-hidden ml-2">
           <button

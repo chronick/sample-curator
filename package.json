@@ -1,6 +1,6 @@
 {
   "name": "@music-hub/sample-curator",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -32,6 +32,8 @@
     "@tanstack/react-virtual": "^3.0.1",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.10.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "three": "^0.172.0",

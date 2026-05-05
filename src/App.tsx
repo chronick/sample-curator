@@ -35,6 +35,8 @@ import { useJobs } from "./hooks/useJobs";
 import { api } from "./api/client";
 import type { SearchFilters, ViewMode } from "./api/types";
 import { OrphanedRecordingsDialog, type OrphanedRecording } from "./components/OrphanedRecordingsDialog";
+import { useUpdater } from "./hooks/useUpdater";
+import { getVersion } from "@tauri-apps/api/app";
 
 type RightPanelMode = "details" | "similar" | "projects" | "duplicates";
 
@@ -89,6 +91,13 @@ function AppContent() {
   const [showViewMenu, setShowViewMenu] = useState(false);
   const viewMenuRef = useRef<HTMLDivElement>(null);
   const [orphans, setOrphans] = useState<OrphanedRecording[] | null>(null);
+  const [appVersion, setAppVersion] = useState<string>("");
+
+  useUpdater();
+
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => {});
+  }, []);
 
   const activeView = useStore((s) => s.activeView);
   const setActiveView = useStore((s) => s.setActiveView);
@@ -281,6 +290,7 @@ function AppContent() {
         showRight={showRight}
         showPlayer={showPlayer}
         llmStatus={llmStatus}
+        appVersion={appVersion}
         onSetActiveView={setActiveView}
         onToggleLeft={() => setShowLeft((v) => !v)}
         onToggleRight={() => setShowRight((v) => !v)}
