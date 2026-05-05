@@ -1,45 +1,19 @@
 import { useEffect } from "react";
-import { check } from "@tauri-apps/plugin-updater";
-import { relaunch } from "@tauri-apps/plugin-process";
-import { ask } from "@tauri-apps/plugin-dialog";
+import { useUpdaterStore } from "../store/updaterStore";
 
 /**
  * Run a single auto-update check on app startup.
  *
- * If a newer release is available on the configured GitHub Releases
- * endpoint, prompt the user. On accept, download + install + relaunch.
+ * State (status, version, error) lives in `useUpdaterStore` so the
+ * banner and the Settings → Updates section can both consume it.
  *
- * Failures are surfaced via console only (no modal) — common cases are
- * "endpoint unreachable" (offline, GH down), which shouldn't pop a
- * dialog every launch.
+ * Failures are surfaced via the store's `error` field — the banner
+ * suppresses them by default (no-op when `status === 'error'`); the
+ * Settings section shows them so manual checks can debug.
  */
 export function useUpdater() {
+  const check = useUpdaterStore((s) => s.check);
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const update = await check();
-        if (cancelled || !update) return;
-
-        const accepted = await ask(
-          `Sample Curator ${update.version} is available.\n\nCurrent version: ${update.currentVersion}.\n\nInstall and restart now?`,
-          {
-            title: "Update available",
-            kind: "info",
-            okLabel: "Install",
-            cancelLabel: "Later",
-          }
-        );
-        if (!accepted) return;
-
-        await update.downloadAndInstall();
-        await relaunch();
-      } catch (err) {
-        console.warn("[updater] check failed:", err);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    void check();
+  }, [check]);
 }

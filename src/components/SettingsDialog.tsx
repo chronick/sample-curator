@@ -5,6 +5,8 @@ import { RANKED_MODELS, type OllamaStatusDict } from "../types/ollama";
 import type { SearchStats } from "../api/types";
 
 import type { OrphanedRecording } from "./OrphanedRecordingsDialog";
+import { getVersion } from "@tauri-apps/api/app";
+import { useUpdaterStore } from "../store/updaterStore";
 
 interface SettingsDialogProps {
   onClose: () => void;
@@ -23,6 +25,18 @@ export function SettingsDialog({ onClose, llmStatus, onRefreshLlm, onSetLlmModel
   const [llmSetError, setLlmSetError] = useState<string | null>(null);
   const [orphanScanning, setOrphanScanning] = useState(false);
   const [orphanScanResult, setOrphanScanResult] = useState<string | null>(null);
+  const [appVersion, setAppVersion] = useState<string>("");
+
+  const updaterStatus = useUpdaterStore((s) => s.status);
+  const updaterNewVersion = useUpdaterStore((s) => s.newVersion);
+  const updaterLastCheckedAt = useUpdaterStore((s) => s.lastCheckedAt);
+  const updaterError = useUpdaterStore((s) => s.error);
+  const updaterCheck = useUpdaterStore((s) => s.check);
+  const updaterInstall = useUpdaterStore((s) => s.install);
+
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => {});
+  }, []);
 
   // Load watch directories and stats on mount
   useEffect(() => {
@@ -257,10 +271,91 @@ export function SettingsDialog({ onClose, llmStatus, onRefreshLlm, onSetLlmModel
               <p className="text-xs text-gray-500">Loading...</p>
             )}
           </section>
+
+          {/* Updates */}
+          <section>
+            <h3 className="text-sm font-medium mb-3">Updates</h3>
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between text-gray-400">
+                <span>Current version</span>
+                <span className="text-gray-300 tabular-nums">
+                  {appVersion ? `v${appVersion}` : "—"}
+                </span>
+              </div>
+              <div className="flex justify-between text-gray-400">
+                <span>Last checked</span>
+                <span className="text-gray-300">
+                  {formatLastChecked(updaterLastCheckedAt)}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => void updaterCheck()}
+                  disabled={updaterStatus === "checking" || updaterStatus === "installing"}
+                  className="px-3 py-1.5 text-xs bg-surface hover:bg-surface-hover border border-surface-border rounded transition-colors disabled:opacity-50"
+                  data-testid="settings-check-updates"
+                >
+                  {updaterStatus === "checking" ? "Checking…" : "Check for Updates"}
+                </button>
+                {updaterStatus === "available" && (
+                  <button
+                    type="button"
+                    onClick={() => void updaterInstall()}
+                    className="px-3 py-1.5 text-xs bg-accent/30 hover:bg-accent/50 text-accent border border-accent rounded font-medium transition-colors"
+                    data-testid="settings-install-update"
+                  >
+                    Install v{updaterNewVersion} &amp; Restart
+                  </button>
+                )}
+                {updaterStatus === "installing" && (
+                  <span className="text-xs text-gray-400">
+                    Installing… app will restart.
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-gray-500" data-testid="settings-update-status">
+                {updaterStatusMessage(updaterStatus, updaterNewVersion, updaterError)}
+              </p>
+            </div>
+          </section>
         </div>
       </div>
     </div>
   );
+}
+
+function formatLastChecked(ts: number | null): string {
+  if (!ts) return "never";
+  const ageMs = Date.now() - ts;
+  if (ageMs < 60_000) return "just now";
+  const minutes = Math.floor(ageMs / 60_000);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hr ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
+function updaterStatusMessage(
+  status: ReturnType<typeof useUpdaterStore.getState>["status"],
+  newVersion: string | null,
+  error: string | null,
+): string {
+  switch (status) {
+    case "idle":
+      return "";
+    case "checking":
+      return "Contacting update server…";
+    case "up_to_date":
+      return "You're on the latest version.";
+    case "available":
+      return `Update available: v${newVersion ?? "?"}.`;
+    case "installing":
+      return "Downloading + verifying signature, then app will restart.";
+    case "error":
+      return `Update check failed: ${error ?? "unknown error"}`;
+  }
 }
 
 export default SettingsDialog;

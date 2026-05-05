@@ -22,6 +22,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { DragHandle } from "./components/DragHandle";
 import { HeaderBar } from "./components/HeaderBar";
 import { OllamaBanner } from "./components/OllamaBanner";
+import { UpdateBanner } from "./components/UpdateBanner";
 import { useLibrary } from "./hooks/useLibrary";
 import { useOllamaStatus } from "./hooks/useOllamaStatus";
 import { useStore } from "./store";
@@ -299,6 +300,7 @@ function AppContent() {
         onShowImport={() => setShowImport(true)}
         onRefresh={refresh}
       />
+      <UpdateBanner />
       <OllamaBanner status={llmStatus} onShowSettings={() => setShowSettings(true)} />
 
       {/* Main content */}
