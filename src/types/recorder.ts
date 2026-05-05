@@ -29,6 +29,13 @@ export interface RecordingInfo {
   sample_rate: number;
   channels: number;
   bit_depth: number;
+  /**
+   * Snapshot of the active arm-cycle session tag at stop time. Threaded
+   * back through `recorder_save_to_library` so disarming during the
+   * writer-finalize → save window does not strip the tag.
+   * `undefined` for manual (un-armed) recordings.
+   */
+  session_tag?: string;
 }
 
 export interface RecordingStatus {
