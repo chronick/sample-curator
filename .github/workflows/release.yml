@@ -22,26 +22,14 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
 
-      - name: Cache cargo
-        uses: actions/cache@v4
+      - name: Cache Rust target
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            src-tauri/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
+          workspaces: src-tauri
 
       - name: Install npm deps
         run: npm ci
-
-      - name: Sync sidecar
-        run: cd sidecar && uv sync --python 3.11
 
       - name: Build + release
         uses: tauri-apps/tauri-action@v0
@@ -55,4 +43,3 @@ jobs:
           releaseDraft: true
           prerelease: false
           includeUpdaterJson: true
-          args: --target universal-apple-darwin

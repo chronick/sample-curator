@@ -6,7 +6,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "MIT"
 
@@ -34,8 +34,8 @@ thiserror = "2.0"
 # --- Workspace profile optimizations for DSP crates ---
 
 [profile.release]
-lto = true
-codegen-units = 1
+lto = "thin"
+codegen-units = 16
 opt-level = 3
 
 [profile.dev]
@@ -58,7 +58,7 @@ opt-level = 3
 
 [package]
 name = "sample-curator"
-version = "0.1.0"
+version = "0.1.1"
 description = "Sample curation GUI for music-hub"
 authors = [""]
 license = ""
