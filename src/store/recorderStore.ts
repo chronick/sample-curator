@@ -78,6 +78,21 @@ interface RecorderStore {
   // Arm mode (ephemeral — not persisted; threshold/silence live in config)
   isArmed: boolean;
   setIsArmed: (armed: boolean) => void;
+
+  // Session lifecycle (continuous-recording UX banner — vault-1ge8)
+  // sessionStartedAt: epoch ms snapshot taken when arm-on flips. The
+  //   banner derives live-elapsed time from this without polling the
+  //   backend. null when disarmed.
+  // sessionClipCount: how many clips finalized inside the current arm
+  //   cycle. Incremented on every addRecording while armed; reset on
+  //   arm-on. Banner uses this to show "loop is alive" feedback.
+  // sessionEndSummary: brief summary shown for ~5s after disarm so the
+  //   user gets a final receipt of the cycle (or a "0 clips" notice
+  //   when nothing crossed threshold). Cleared by clearSessionEndSummary.
+  sessionStartedAt: number | null;
+  sessionClipCount: number;
+  sessionEndSummary: { clipCount: number; durationMs: number } | null;
+  clearSessionEndSummary: () => void;
 }
 
 export const useRecorderStore = create<RecorderStore>((set) => ({
@@ -129,6 +144,12 @@ export const useRecorderStore = create<RecorderStore>((set) => ({
         { ...recording, saving: true },
         ...state.recentRecordings,
       ].slice(0, 20),
+      // Bump the in-cycle clip counter so the banner increments live.
+      // We don't gate on isArmed: a clip recorded after disarm-but-before-save
+      // still belongs to its session (the recording's session_tag is
+      // independent of the banner counter, per vault-34ut). The banner
+      // just hides on disarm anyway.
+      sessionClipCount: state.sessionClipCount + 1,
     })),
   updateRecordingSampleId: (path, sampleId) =>
     set((state) => ({
@@ -172,5 +193,39 @@ export const useRecorderStore = create<RecorderStore>((set) => ({
 
   // Arm mode
   isArmed: false,
-  setIsArmed: (isArmed) => set({ isArmed }),
+  setIsArmed: (isArmed) =>
+    set((state) => {
+      if (isArmed && state.sessionStartedAt === null) {
+        // Arm-on: stamp start time, reset clip counter, drop any
+        // lingering end-summary from a previous cycle.
+        return {
+          isArmed,
+          sessionStartedAt: Date.now(),
+          sessionClipCount: 0,
+          sessionEndSummary: null,
+        };
+      }
+      if (!isArmed && state.sessionStartedAt !== null) {
+        // Arm-off: snapshot end summary for the banner to render
+        // briefly, then clear the live session state. The summary
+        // stays around until clearSessionEndSummary fires (banner
+        // schedules that on a timer).
+        return {
+          isArmed,
+          sessionStartedAt: null,
+          sessionClipCount: 0,
+          sessionEndSummary: {
+            clipCount: state.sessionClipCount,
+            durationMs: Date.now() - state.sessionStartedAt,
+          },
+        };
+      }
+      return { isArmed };
+    }),
+
+  // Session lifecycle
+  sessionStartedAt: null,
+  sessionClipCount: 0,
+  sessionEndSummary: null,
+  clearSessionEndSummary: () => set({ sessionEndSummary: null }),
 }));
