@@ -940,6 +940,15 @@ impl Database {
         Ok(groups)
     }
 
+    /// Return all paths stored in the samples table as a set.
+    pub fn get_all_sample_paths(&self) -> Result<std::collections::HashSet<String>> {
+        let mut stmt = self.conn.prepare("SELECT path FROM samples")?;
+        let paths = stmt
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<std::result::Result<std::collections::HashSet<_>, _>>()?;
+        Ok(paths)
+    }
+
     /// Get raw connection for advanced operations.
     pub fn connection(&self) -> &Connection {
         &self.conn

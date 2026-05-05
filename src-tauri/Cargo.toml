@@ -90,6 +90,7 @@ rustfft = "6.2"
 crossbeam = "0.8"
 chrono = "0.4"
 dirs = "5.0"
+trash = "3"
 
 # Automation control channel (feature-gated)
 tokio-tungstenite = { version = "0.24", optional = true }

@@ -33,6 +33,7 @@ import { RecorderPanel } from "./components/recorder";
 import { useJobs } from "./hooks/useJobs";
 import { api } from "./api/client";
 import type { SearchFilters, ViewMode } from "./api/types";
+import { OrphanedRecordingsDialog, type OrphanedRecording } from "./components/OrphanedRecordingsDialog";
 
 type RightPanelMode = "details" | "similar" | "projects" | "duplicates";
 
@@ -86,6 +87,7 @@ function AppContent() {
   const [acousticTags, setAcousticTags] = useState<string[]>([]);
   const [showViewMenu, setShowViewMenu] = useState(false);
   const viewMenuRef = useRef<HTMLDivElement>(null);
+  const [orphans, setOrphans] = useState<OrphanedRecording[] | null>(null);
 
   const activeView = useStore((s) => s.activeView);
   const setActiveView = useStore((s) => s.setActiveView);
@@ -108,7 +110,16 @@ function AppContent() {
   useEffect(() => {
     if (typeof window.__TAURI_INTERNALS__ === "undefined") {
       setInitError("Not running in Tauri context. Please use the desktop app.");
+      return;
     }
+    // Scan for orphaned recordings in the background; show dialog only if any found
+    import("@tauri-apps/api/core").then(({ invoke }) => {
+      invoke<OrphanedRecording[]>("scan_orphaned_recordings")
+        .then((results) => {
+          if (results.length > 0) setOrphans(results);
+        })
+        .catch((err) => console.warn("Orphan scan failed:", err));
+    });
   }, []);
 
   // Close view menu on click outside
@@ -651,6 +662,18 @@ function AppContent() {
           llmStatus={llmStatus}
           onRefreshLlm={refreshLlm}
           onSetLlmModel={setLlmModel}
+          onShowOrphans={(results) => {
+            setShowSettings(false);
+            setOrphans(results);
+          }}
+        />
+      )}
+
+      {/* Orphaned recordings dialog — shown on startup and via Settings */}
+      {orphans && orphans.length > 0 && (
+        <OrphanedRecordingsDialog
+          orphans={orphans}
+          onClose={() => setOrphans(null)}
         />
       )}
     </div>

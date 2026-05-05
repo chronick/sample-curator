@@ -4,20 +4,25 @@ import { getNativeQuality, getNativeAudioInfo } from "../hooks/useNativeAnalysis
 import { RANKED_MODELS, type OllamaStatusDict } from "../types/ollama";
 import type { SearchStats } from "../api/types";
 
+import type { OrphanedRecording } from "./OrphanedRecordingsDialog";
+
 interface SettingsDialogProps {
   onClose: () => void;
   llmStatus: OllamaStatusDict;
   onRefreshLlm: () => Promise<void>;
   onSetLlmModel: (model: string | null) => Promise<void>;
+  onShowOrphans: (orphans: OrphanedRecording[]) => void;
 }
 
-export function SettingsDialog({ onClose, llmStatus, onRefreshLlm, onSetLlmModel }: SettingsDialogProps) {
+export function SettingsDialog({ onClose, llmStatus, onRefreshLlm, onSetLlmModel, onShowOrphans }: SettingsDialogProps) {
   const [watchDirs, setWatchDirs] = useState<string[]>([]);
   const [stats, setStats] = useState<SearchStats | null>(null);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
   const [llmRefreshing, setLlmRefreshing] = useState(false);
   const [llmSetError, setLlmSetError] = useState<string | null>(null);
+  const [orphanScanning, setOrphanScanning] = useState(false);
+  const [orphanScanResult, setOrphanScanResult] = useState<string | null>(null);
 
   // Load watch directories and stats on mount
   useEffect(() => {
@@ -51,6 +56,24 @@ export function SettingsDialog({ onClose, llmStatus, onRefreshLlm, onSetLlmModel
       console.error("Failed to remove watch directory:", err);
     }
   }, []);
+
+  const handleScanOrphans = useCallback(async () => {
+    setOrphanScanning(true);
+    setOrphanScanResult(null);
+    try {
+      const results = await invoke<OrphanedRecording[]>("scan_orphaned_recordings");
+      if (results.length === 0) {
+        setOrphanScanResult("No orphaned recordings found.");
+      } else {
+        onClose();
+        onShowOrphans(results);
+      }
+    } catch (err) {
+      setOrphanScanResult(`Error: ${err}`);
+    } finally {
+      setOrphanScanning(false);
+    }
+  }, [onClose, onShowOrphans]);
 
   const handleTestAnalysis = useCallback(async () => {
     setTesting(true);
@@ -195,6 +218,21 @@ export function SettingsDialog({ onClose, llmStatus, onRefreshLlm, onSetLlmModel
                 {llmRefreshing ? "Refreshing…" : "Refresh"}
               </button>
             </div>
+          </section>
+
+          {/* Recordings */}
+          <section>
+            <h3 className="text-sm font-medium mb-3">Recordings</h3>
+            <button
+              onClick={handleScanOrphans}
+              disabled={orphanScanning}
+              className="px-3 py-1.5 bg-surface hover:bg-surface-hover border border-surface-border rounded text-sm transition-colors disabled:opacity-50"
+            >
+              {orphanScanning ? "Scanning…" : "Scan for orphaned recordings"}
+            </button>
+            {orphanScanResult && (
+              <p className="mt-2 text-xs text-gray-400">{orphanScanResult}</p>
+            )}
           </section>
 
           {/* Library Info */}

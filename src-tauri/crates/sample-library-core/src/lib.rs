@@ -13,6 +13,7 @@
 pub mod db;
 pub mod embedding;
 pub mod error;
+pub mod orphans;
 pub mod search;
 pub mod projects;
 pub mod jobs;

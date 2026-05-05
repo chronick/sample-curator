@@ -13,6 +13,7 @@ mod db_commands;
 mod duplicates;
 mod import_commands;
 mod jobs;
+mod orphans;
 mod projects;
 mod recorder;
 mod search;
@@ -569,6 +570,10 @@ fn main() {
             recorder_get_config,
             recorder_set_config,
             recorder_save_to_library,
+            // Orphan recording recovery
+            orphans::scan_orphaned_recordings,
+            orphans::delete_orphaned_recording,
+            orphans::import_orphaned_recording,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
