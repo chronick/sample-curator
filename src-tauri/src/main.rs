@@ -18,6 +18,7 @@ mod projects;
 mod recorder;
 mod search;
 mod sidecar;
+mod split;
 mod watch;
 
 use audio::AudioState;
@@ -627,6 +628,8 @@ fn main() {
             session_current,
             session_set_stem_separation,
             recorder_save_to_library,
+            // Multi-select split — turn long recordings into useful samples (vault-3fe9)
+            split::split_samples,
             // Orphan recording recovery
             orphans::scan_orphaned_recordings,
             orphans::delete_orphaned_recording,
