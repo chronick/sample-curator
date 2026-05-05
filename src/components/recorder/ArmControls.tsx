@@ -25,7 +25,13 @@ export function ArmControls() {
   const handleThreshold = (v: number) => persistConfig({ arm_threshold_db: v });
   const handleSilence = (v: number) => persistConfig({ arm_silence_ms: v });
 
-  const toggleArmed = () => setIsArmed(!isArmed);
+  const toggleArmed = () => {
+    const next = !isArmed;
+    setIsArmed(next);
+    invoke("recorder_set_armed", { armed: next }).catch((e) =>
+      console.warn("Failed to update backend arm state:", e)
+    );
+  };
 
   const statusLabel = !isArmed
     ? "Disarmed"
