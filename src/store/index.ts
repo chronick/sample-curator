@@ -6,7 +6,7 @@ import { create } from "zustand";
 import type { Sample, Pack, SearchFilters, ImportProgress, ViewMode } from "../api/types";
 import type { Tab } from "../components/TabBar";
 
-type ActiveView = "browse" | "jobs" | "record";
+type ActiveView = "browse" | "jobs" | "record" | "sessions";
 
 interface LibraryState {
   // Sample data
