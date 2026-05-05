@@ -7,6 +7,7 @@ import { RecordButton } from "./RecordButton";
 import { RecordingsList } from "./RecordingsList";
 import { RecorderSettingsDialog } from "./RecorderSettingsDialog";
 import { ArmControls } from "./ArmControls";
+import { SessionBanner } from "./SessionBanner";
 import { useRecorderStore } from "../../store/recorderStore";
 import { useRecorder } from "../../hooks/useRecorder";
 import { useStore } from "../../store";
@@ -57,6 +58,9 @@ export function RecorderPanel() {
 
       {/* Arm-mode controls */}
       <ArmControls />
+
+      {/* Continuous-recording session banner (visible while armed) */}
+      <SessionBanner />
 
       {/* Auto-import notification */}
       {lastSaved && (
