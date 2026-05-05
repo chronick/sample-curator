@@ -10,6 +10,7 @@ vi.mock("../api", () => ({
     search: vi.fn(),
     listPacks: vi.fn(),
     listTags: vi.fn(),
+    listUserTags: vi.fn(),
     getTypeCounts: vi.fn(),
     batchDelete: vi.fn(),
     batchAddTags: vi.fn(),
@@ -87,6 +88,7 @@ describe("useLibrary", () => {
     mockApi.search.mockResolvedValue({ samples: [], total: 0 });
     mockApi.listPacks.mockResolvedValue([]);
     mockApi.listTags.mockResolvedValue([]);
+    mockApi.listUserTags.mockResolvedValue([]);
     mockApi.getTypeCounts.mockResolvedValue([]);
   });
 
@@ -222,6 +224,7 @@ describe("useLibrary", () => {
     mockApi.search.mockClear();
     mockApi.listPacks.mockClear();
     mockApi.listTags.mockClear();
+    mockApi.listUserTags.mockClear();
     mockApi.getTypeCounts.mockClear();
 
     act(() => {
@@ -230,7 +233,7 @@ describe("useLibrary", () => {
 
     expect(mockApi.search).toHaveBeenCalled();
     expect(mockApi.listPacks).toHaveBeenCalled();
-    expect(mockApi.listTags).toHaveBeenCalled();
+    expect(mockApi.listUserTags).toHaveBeenCalled();
     expect(mockApi.getTypeCounts).toHaveBeenCalled();
   });
 });

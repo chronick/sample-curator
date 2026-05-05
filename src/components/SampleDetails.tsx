@@ -12,9 +12,9 @@ export function SampleDetails({ sample, acousticTags, onUpdate }: { sample: Samp
   const [tagSuggestions, setTagSuggestions] = useState<string[]>([]);
   const [allTags, setAllTags] = useState<string[]>([]);
 
-  // Load all tags for autocomplete
+  // Load tags for autocomplete (excludes system-tag prefixes).
   useEffect(() => {
-    api.listTags().then(setAllTags).catch(() => {});
+    api.listUserTags().then(setAllTags).catch(() => {});
   }, []);
 
   const startEdit = (field: string, currentValue: string) => {

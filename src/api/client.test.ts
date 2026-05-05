@@ -83,6 +83,15 @@ describe('api client', () => {
     expect(mockInvoke).toHaveBeenCalledWith('db_list_tags');
   });
 
+  it('listUserTags calls db_list_user_tags', async () => {
+    mockInvoke.mockResolvedValue(['kick']);
+
+    const result = await api.listUserTags();
+
+    expect(mockInvoke).toHaveBeenCalledWith('db_list_user_tags');
+    expect(result).toEqual(['kick']);
+  });
+
   it('addTags calls db_add_tags with sampleId and tags', async () => {
     mockInvoke.mockResolvedValue({ id: 1 });
 

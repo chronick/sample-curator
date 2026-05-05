@@ -741,6 +741,11 @@ impl Database {
 
     // =========== Tag Operations ===========
 
+    /// Tag-name prefixes considered system/internal — hidden from generic
+    /// autocomplete surfaces. Per-sample tag rendering bypasses this filter.
+    pub const USER_TAG_EXCLUDE_PREFIXES: &'static [&'static str] =
+        &["session:", "parent:", "stem:", "stems-"];
+
     /// Get all tags.
     pub fn get_tags(&self) -> Result<Vec<Tag>> {
         let mut stmt = self.conn.prepare("SELECT * FROM tags ORDER BY name")?;
@@ -748,6 +753,26 @@ impl Database {
             .query_map([], Tag::from_row)?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(tags)
+    }
+
+    /// Get tags excluding any whose name starts with one of `exclude_prefixes`.
+    /// Used by autocomplete/suggestion surfaces to hide system tags.
+    pub fn get_tags_excluding(&self, exclude_prefixes: &[&str]) -> Result<Vec<Tag>> {
+        let tags = self.get_tags()?;
+        Ok(tags
+            .into_iter()
+            .filter(|t| {
+                !exclude_prefixes
+                    .iter()
+                    .any(|p| t.name.starts_with(p))
+            })
+            .collect())
+    }
+
+    /// Get tags suitable for user-facing autocomplete: excludes the canonical
+    /// set of system prefixes (`session:`, `parent:`, `stem:`, `stems-`).
+    pub fn get_user_tags(&self) -> Result<Vec<Tag>> {
+        self.get_tags_excluding(Self::USER_TAG_EXCLUDE_PREFIXES)
     }
 
     /// Get tags for a sample.
@@ -1272,5 +1297,54 @@ mod tests {
             "[session_list query plan, seeded 10 sessions x 12 clips + 5 stray tags]: {}",
             plan_text
         );
+    }
+
+    #[test]
+    fn test_get_user_tags_excludes_system_prefixes() {
+        let db = Database::open_in_memory().unwrap();
+
+        db.conn
+            .execute(
+                "INSERT INTO samples (path, source_type) VALUES ('test.wav', 'imported')",
+                [],
+            )
+            .unwrap();
+
+        let sample_id = 1;
+        for tag in [
+            "session:test-1",
+            "parent:42",
+            "stem:drums",
+            "stems-done",
+            "kick",
+        ] {
+            db.add_tag_to_sample(sample_id, tag).unwrap();
+        }
+
+        // get_tags() returns everything (still used for per-sample listings).
+        let all = db.get_tags().unwrap();
+        let all_names: Vec<&str> = all.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(all.len(), 5, "get_tags should be unfiltered");
+        assert!(all_names.contains(&"session:test-1"));
+
+        // get_user_tags() suppresses the system prefixes.
+        let user_tags = db.get_user_tags().unwrap();
+        let user_names: Vec<&str> = user_tags.iter().map(|t| t.name.as_str()).collect();
+
+        assert!(user_names.contains(&"kick"), "regular tag must be present");
+        for system in ["session:test-1", "parent:42", "stem:drums", "stems-done"] {
+            assert!(
+                !user_names.contains(&system),
+                "system tag {system} must be excluded"
+            );
+        }
+        assert_eq!(user_tags.len(), 1);
+
+        // Per-sample tag listings remain unfiltered (sample detail view contract).
+        let sample_tags = db.get_sample_tags(sample_id).unwrap();
+        let sample_tag_names: Vec<&str> =
+            sample_tags.iter().map(|t| t.name.as_str()).collect();
+        assert!(sample_tag_names.contains(&"session:test-1"));
+        assert!(sample_tag_names.contains(&"parent:42"));
     }
 }
