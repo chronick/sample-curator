@@ -331,6 +331,12 @@ def _instantiate_model(model_id: str) -> Any:
             ) from e
         short = model_id.rsplit("/", 1)[-1]
         return get_model(short)
+    # HF causal-LM models for the LLM naming-refinement feature
+    # (vault-3ume). Lookup uses the explicit registry in ``llm.HF_LLM_MODELS``
+    # so we don't accidentally LM-load arbitrary HF repos.
+    from sample_curation_api.llm import HF_LLM_MODELS, instantiate_hf_llm
+    if model_id in HF_LLM_MODELS:
+        return instantiate_hf_llm(model_id)
     raise RuntimeError(f"Unsupported model kind: {model_id}")
 
 

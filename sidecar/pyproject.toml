@@ -92,14 +92,23 @@ transcription = [
     "faster-whisper>=1.0.0",
 ]
 
-# Local LLM refinement (via ollama) — turns the mechanical transcript-derived
-# stem into a more evocative name. Requires a running local ollama daemon.
-# The sidecar auto-detects a model from the ranked list (gemma4:e2b,
-# gemma3:1b, qwen2.5:3b); override via `SAMPLE_CURATOR_OLLAMA_MODEL` or the
-# `set_ollama_model` RPC. The client is ~10KB and has no other deps.
-# See README's "Enable LLM Vocal Naming" section for the full install flow.
+# Local LLM refinement (via ollama) — one of three backends for the LLM
+# naming-refinement feature. Requires a running local ollama daemon.
+# Override the active model via `SAMPLE_CURATOR_OLLAMA_MODEL` or the
+# Settings → ML features → Backend dropdown.
 llm = [
     "ollama>=0.3.0",
+]
+
+# LLM refinement via HuggingFace transformers — second of three backends.
+# Self-contained (no daemon required); first run downloads ~1 GB for the
+# default Qwen 2.5 0.5B Instruct. transformers + torch already ship with
+# the embedding extra, but we list them here so users can install
+# `[llm-hf]` without pulling in CLAP.
+llm-hf = [
+    "transformers>=4.40",
+    "torch>=2.0.0",
+    "accelerate>=0.25.0",
 ]
 
 # All optional features

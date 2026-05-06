@@ -508,84 +508,35 @@ def _transcribe_to_stem(path: str, max_words: int = 3) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Local-LLM refinement via ollama
+# Local-LLM refinement
 # ---------------------------------------------------------------------------
-# Model selection lives in ollama_status.resolve_model(); env-var override,
-# persisted UI choice, and auto-detect from a ranked list all funnel through
-# there. The active model is read via ``OllamaStatus.current_model()``.
-OLLAMA_TIMEOUT_S = 8.0
-OLLAMA_PROMPT_TEMPLATE = """You are naming a short vocal audio sample for a music producer's sample library.
+# Backend selection (foundation / ollama / hf) + model_id lives in
+# ``~/.music-hub-data/ml-features-config.json``. ``llm.refine_transcript``
+# reads it and dispatches; this module just calls through.
 
-Transcript: "{transcript}"
-
-Produce a memorable 2-4 word filename stem. Rules:
-- Lowercase only, words joined by hyphens (e.g. 'eternal-wave-chant')
-- Use evocative content words (nouns, strong verbs); skip filler
-- Max 40 characters total
-- Return ONLY the stem — no quotes, no explanation, no trailing punctuation
-
-Stem:"""
-
-
-def _sanitize_llm_stem(raw: str) -> str:
-    """Reduce LLM output to filename-safe chars. Strips wrapping quotes,
-    spaces/underscores become hyphens, collapses duplicate hyphens, trims
-    leading/trailing dashes."""
-    stem = raw.strip().lower()
-    # Take only the first line — LLMs sometimes add a second explanation line.
-    stem = stem.split("\n", 1)[0].strip()
-    # Strip common wrappers
-    for ch in ('"', "'", "`", "*", "_"):
-        stem = stem.replace(ch, "")
-    stem = stem.replace(" ", "-")
-    # Keep only ascii alphanumeric + hyphen
-    stem = "".join(c for c in stem if c.isascii() and (c.isalnum() or c == "-"))
-    while "--" in stem:
-        stem = stem.replace("--", "-")
-    return stem.strip("-")
+# Back-compat shim — the prompt template and sanitizer moved to ``llm.py``.
+# Tests reference these via ``naming._sanitize_llm_stem``; keep the alias.
+from sample_curation_api.llm import (  # noqa: E402
+    LLM_PROMPT_TEMPLATE as OLLAMA_PROMPT_TEMPLATE,
+    _sanitize_stem as _sanitize_llm_stem,
+)
 
 
 def _refine_transcript_with_llm(transcript: str) -> str | None:
-    """Ask the local ollama daemon to produce a catchy filename stem from
-    the full transcript. Returns ``None`` on any failure (ollama not
-    installed, daemon not running, no model selected, empty output, etc.).
+    """Ask the active LLM backend to produce a catchy filename stem from
+    the full transcript. Returns ``None`` on any failure or when the
+    foundation backend is selected (Rust handles foundation post-hoc).
 
     Deliberately swallows every exception so naming never fails the whole
     save-to-library flow just because the LLM tier is down — the caller
     still has the mechanical stem as a reliable fallback.
     """
-    if not transcript or not transcript.strip():
-        return None
-
     try:
-        import ollama  # type: ignore
-    except Exception:
-        return None
+        from sample_curation_api.llm import refine_transcript
 
-    from sample_curation_api.ollama_status import OllamaStatus
-
-    model = OllamaStatus.instance().current_model()
-    if not model:
-        return None
-
-    try:
-        prompt = OLLAMA_PROMPT_TEMPLATE.format(transcript=transcript.strip())
-        response = ollama.chat(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            options={
-                "temperature": 0.4,
-                "num_predict": 24,  # stems are short; cap tokens so we return fast
-            },
-            stream=False,
-        )
-        raw = response.get("message", {}).get("content", "")
-        sanitized = _sanitize_llm_stem(raw)
-        if not sanitized or len(sanitized) < 3 or len(sanitized) > 60:
-            return None
-        return sanitized
+        return refine_transcript(transcript)
     except Exception as e:
-        log.warning("Ollama refinement (%s) failed: %s", model, e)
+        log.warning("LLM refinement failed: %s", e)
         return None
 
 
