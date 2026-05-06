@@ -28,8 +28,17 @@ jobs:
         with:
           workspaces: src-tauri
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Setup Python 3.11
+        run: uv python install 3.11
+
       - name: Install npm deps
         run: npm ci
+
+      - name: Bundle Python sidecar (PyInstaller, vault-3bd8)
+        run: npm run sidecar:bundle
 
       - name: Build + release
         uses: tauri-apps/tauri-action@v0

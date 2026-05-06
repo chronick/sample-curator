@@ -1,6 +1,6 @@
 {
   "productName": "Sample Curator",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "identifier": "com.music-hub.sample-curator",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -54,7 +54,9 @@
       "providerShortName": null,
       "signingIdentity": null
     },
-    "resources": [],
+    "resources": {
+      "../sidecar/dist/sample-curation-api/": "sidecar/"
+    },
     "shortDescription": "",
     "targets": "all",
     "windows": {

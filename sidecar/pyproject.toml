@@ -37,6 +37,14 @@ dev = [
     "mypy>=1.7.0",
 ]
 
+# PyInstaller toolchain — used by `npm run sidecar:bundle` and the
+# release CI to freeze the sidecar into a self-contained binary that
+# ships inside the .app (vault-3bd8). Lives in its own extra so dev
+# and test environments don't pay the binary-bundling cost.
+bundle = [
+    "pyinstaller>=6.0.0",
+]
+
 # Audio fingerprinting for duplicate detection
 fingerprint = [
     "pyacoustid>=1.3.0",

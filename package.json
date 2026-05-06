@@ -1,6 +1,6 @@
 {
   "name": "@music-hub/sample-curator",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "type": "module",
   "scripts": {
@@ -18,6 +18,7 @@
     "typecheck": "tsc --noEmit",
     "sidecar:sync": "cd sidecar && uv sync --python 3.11",
     "sidecar:sync:full": "cd sidecar && uv sync --python 3.11 --extra fingerprint --extra segmentation",
+    "sidecar:bundle": "cd sidecar && uv sync --python 3.11 --extra bundle && uv run pyinstaller sample-curation-api.spec --clean --noconfirm",
     "sidecar:test": "cd sidecar && uv run pytest",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -30,8 +31,8 @@
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.0.1",
-    "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-dialog": "^2",
+    "@tauri-apps/api": "^2.11.0",
+    "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-updater": "^2.10.1",
     "react": "^18.2.0",
@@ -41,7 +42,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
-    "@tauri-apps/cli": "^2",
+    "@tauri-apps/cli": "^2.11.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/react": "^18.2.45",
