@@ -60,6 +60,7 @@ interface MlFeaturesState {
   download: (modelId: string) => Promise<void>;
   cancel: (modelId: string) => Promise<void>;
   remove: (modelId: string) => Promise<void>;
+  reload: (modelId: string) => Promise<void>;
   startPolling: () => void;
   stopPolling: () => void;
 }
@@ -140,6 +141,17 @@ export const useMlFeaturesStore = create<MlFeaturesState>((set, get) => ({
     try {
       await invoke("ml_remove_model", { modelId });
       await get().refresh();
+    } catch (e) {
+      set({ error: e instanceof Error ? e.message : String(e) });
+    }
+  },
+
+  async reload(modelId) {
+    set({ error: null });
+    try {
+      const status = await invoke<MlStatus>("ml_reload_model", { modelId });
+      set({ status });
+      if (isTransient(status)) get().startPolling();
     } catch (e) {
       set({ error: e instanceof Error ? e.message : String(e) });
     }

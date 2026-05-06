@@ -24,7 +24,6 @@ import { HeaderBar } from "./components/HeaderBar";
 import { IssuesBanner } from "./components/IssuesBanner";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { useLibrary } from "./hooks/useLibrary";
-import { useOllamaStatus } from "./hooks/useOllamaStatus";
 import { useStore } from "./store";
 import { usePlayer } from "./hooks/usePlayer";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
@@ -104,7 +103,6 @@ function AppContent() {
   const setActiveView = useStore((s) => s.setActiveView);
 
   const { jobStats } = useJobs();
-  const { status: llmStatus, refresh: refreshLlm, setModel: setLlmModel } = useOllamaStatus();
 
   // Panel sizes (px)
   const [leftWidth, setLeftWidth] = useState(256);
@@ -290,7 +288,6 @@ function AppContent() {
         showLeft={showLeft}
         showRight={showRight}
         showPlayer={showPlayer}
-        llmStatus={llmStatus}
         appVersion={appVersion}
         onSetActiveView={setActiveView}
         onToggleLeft={() => setShowLeft((v) => !v)}
@@ -301,7 +298,7 @@ function AppContent() {
         onRefresh={refresh}
       />
       <UpdateBanner />
-      <IssuesBanner llmStatus={llmStatus} onShowSettings={() => setShowSettings(true)} />
+      <IssuesBanner onShowSettings={() => setShowSettings(true)} />
 
       {/* Main content */}
       <div className="flex flex-1 overflow-hidden">
@@ -674,9 +671,6 @@ function AppContent() {
       {showSettings && (
         <SettingsDialog
           onClose={() => setShowSettings(false)}
-          llmStatus={llmStatus}
-          onRefreshLlm={refreshLlm}
-          onSetLlmModel={setLlmModel}
           onShowOrphans={(results) => {
             setShowSettings(false);
             setOrphans(results);

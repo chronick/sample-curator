@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { type OllamaStatusDict } from "../types/ollama";
 import type { OrphanedRecording } from "./OrphanedRecordingsDialog";
 import { GeneralTab } from "./settings/GeneralTab";
 import { AudioTab } from "./settings/AudioTab";
@@ -21,18 +20,12 @@ const TABS: { id: TabId; label: string }[] = [
 
 interface SettingsDialogProps {
   onClose: () => void;
-  llmStatus: OllamaStatusDict;
-  onRefreshLlm: () => Promise<void>;
-  onSetLlmModel: (model: string | null) => Promise<void>;
   onShowOrphans: (orphans: OrphanedRecording[]) => void;
   initialTab?: TabId;
 }
 
 export function SettingsDialog({
   onClose,
-  llmStatus,
-  onRefreshLlm,
-  onSetLlmModel,
   onShowOrphans,
   initialTab = "general",
 }: SettingsDialogProps) {
@@ -94,13 +87,7 @@ export function SettingsDialog({
             {tab === "files" && (
               <FilesTab onClose={onClose} onShowOrphans={onShowOrphans} />
             )}
-            {tab === "analysis-ml" && (
-              <AnalysisMlTab
-                llmStatus={llmStatus}
-                onRefreshLlm={onRefreshLlm}
-                onSetLlmModel={onSetLlmModel}
-              />
-            )}
+            {tab === "analysis-ml" && <AnalysisMlTab />}
             {tab === "library" && <LibraryTab />}
             {tab === "about" && <AboutTab />}
           </div>

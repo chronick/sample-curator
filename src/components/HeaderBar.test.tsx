@@ -1,17 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { HeaderBar } from "./HeaderBar";
-import type { OllamaStatusDict } from "../types/ollama";
 
-function makeLlmStatus(overrides: Partial<OllamaStatusDict> = {}): OllamaStatusDict {
-  return {
-    state: "loaded",
-    model: "gemma3:1b",
-    available_models: ["gemma3:1b"],
-    error: null,
-    ...overrides,
-  };
-}
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn().mockResolvedValue({ features: [], models: [] }),
+}));
 
 function defaultProps() {
   return {
@@ -19,7 +12,6 @@ function defaultProps() {
     showLeft: false,
     showRight: false,
     showPlayer: false,
-    llmStatus: makeLlmStatus(),
     onSetActiveView: vi.fn(),
     onToggleLeft: vi.fn(),
     onToggleRight: vi.fn(),
@@ -164,60 +156,8 @@ describe("HeaderBar", () => {
     expect(screen.getByText("Refresh")).toBeInTheDocument();
   });
 
-  describe("LLM status dot", () => {
-    it("shows green dot when loaded", () => {
-      render(<HeaderBar {...defaultProps()} llmStatus={makeLlmStatus({ state: "loaded", model: "gemma3:1b" })} />);
-      const dot = screen.getByTestId("llm-status-dot");
-      expect(dot.className).toContain("bg-green-500");
-    });
-
-    it("shows pulsing yellow dot when loading", () => {
-      render(<HeaderBar {...defaultProps()} llmStatus={makeLlmStatus({ state: "loading", model: null })} />);
-      const dot = screen.getByTestId("llm-status-dot");
-      expect(dot.className).toContain("bg-yellow-400");
-      expect(dot.className).toContain("animate-pulse");
-    });
-
-    it("shows grey dot when not_loaded", () => {
-      render(<HeaderBar {...defaultProps()} llmStatus={makeLlmStatus({ state: "not_loaded", model: null })} />);
-      const dot = screen.getByTestId("llm-status-dot");
-      expect(dot.className).toContain("bg-gray-500");
-    });
-
-    it("shows red dot when errored", () => {
-      render(<HeaderBar {...defaultProps()} llmStatus={makeLlmStatus({ state: "errored", model: null, error: "daemon crash" })} />);
-      const dot = screen.getByTestId("llm-status-dot");
-      expect(dot.className).toContain("bg-red-500");
-    });
-
-    it("tooltip says LLM ready with model when loaded", () => {
-      render(<HeaderBar {...defaultProps()} llmStatus={makeLlmStatus({ state: "loaded", model: "gemma3:1b" })} />);
-      expect(screen.getByTitle("LLM ready: gemma3:1b")).toBeInTheDocument();
-    });
-
-    it("tooltip says LLM loading with model when loading and model known", () => {
-      render(<HeaderBar {...defaultProps()} llmStatus={makeLlmStatus({ state: "loading", model: "gemma3:1b" })} />);
-      expect(screen.getByTitle("LLM loading: gemma3:1b…")).toBeInTheDocument();
-    });
-
-    it("tooltip says detecting when loading and no model", () => {
-      render(<HeaderBar {...defaultProps()} llmStatus={makeLlmStatus({ state: "loading", model: null })} />);
-      expect(screen.getByTitle("LLM loading: detecting…")).toBeInTheDocument();
-    });
-
-    it("tooltip says click Settings when not_loaded", () => {
-      render(<HeaderBar {...defaultProps()} llmStatus={makeLlmStatus({ state: "not_loaded", model: null })} />);
-      expect(screen.getByTitle("LLM not loaded — click Settings to configure")).toBeInTheDocument();
-    });
-
-    it("tooltip shows error message when errored", () => {
-      render(<HeaderBar {...defaultProps()} llmStatus={makeLlmStatus({ state: "errored", model: null, error: "daemon crash" })} />);
-      expect(screen.getByTitle("LLM error: daemon crash")).toBeInTheDocument();
-    });
-
-    it("tooltip falls back to 'unknown' when errored with no error message", () => {
-      render(<HeaderBar {...defaultProps()} llmStatus={makeLlmStatus({ state: "errored", model: null, error: null })} />);
-      expect(screen.getByTitle("LLM error: unknown")).toBeInTheDocument();
-    });
+  it("renders the ML status indicator (replaces former LLM dot)", () => {
+    render(<HeaderBar {...defaultProps()} />);
+    expect(screen.getByTestId("ml-status-indicator")).toBeInTheDocument();
   });
 });

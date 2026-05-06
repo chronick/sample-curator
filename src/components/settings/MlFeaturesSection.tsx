@@ -56,7 +56,6 @@ function FeatureRow({
 
   const compatibleModels = models.filter((m) => m.kind === feature.kind);
   const selectedModel = models.find((m) => m.model_id === feature.model_id);
-  const canEnable = selectedModel?.downloaded ?? false;
 
   return (
     <div
@@ -70,7 +69,6 @@ function FeatureRow({
         </div>
         <FeatureToggle
           enabled={feature.enabled}
-          canEnable={canEnable}
           onChange={(v) => void setEnabled(feature.feature_id, v)}
           testId={`ml-feature-toggle-${feature.feature_id}`}
         />
@@ -86,7 +84,8 @@ function FeatureRow({
         >
           {compatibleModels.map((m) => (
             <option key={m.model_id} value={m.model_id}>
-              {m.label} · ~{m.size_estimate_mb} MB
+              {m.label}
+              {m.size_estimate_mb > 0 ? ` · ~${m.size_estimate_mb} MB` : ""}
             </option>
           ))}
         </select>
@@ -99,26 +98,21 @@ function FeatureRow({
 
 function FeatureToggle({
   enabled,
-  canEnable,
   onChange,
   testId,
 }: {
   enabled: boolean;
-  canEnable: boolean;
   onChange: (v: boolean) => void;
   testId: string;
 }) {
-  const disabled = !enabled && !canEnable;
   return (
     <button
       type="button"
       role="switch"
       aria-checked={enabled}
       data-testid={testId}
-      disabled={disabled}
-      title={disabled ? "Download the model first to enable this feature" : undefined}
       onClick={() => onChange(!enabled)}
-      className={`shrink-0 relative inline-flex h-5 w-9 items-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+      className={`shrink-0 relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
         enabled ? "bg-accent" : "bg-surface-border"
       }`}
     >
@@ -141,15 +135,19 @@ function ModelStatusRow({
   const download = useMlFeaturesStore((s) => s.download);
   const cancel = useMlFeaturesStore((s) => s.cancel);
   const remove = useMlFeaturesStore((s) => s.remove);
+  const reload = useMlFeaturesStore((s) => s.reload);
+
+  const isOllama = model.download_strategy === "lib_managed:ollama";
+  const libName = model.download_strategy.startsWith("lib_managed:")
+    ? model.download_strategy.split(":")[1]
+    : null;
 
   return (
     <div className="flex items-center justify-between gap-2">
       <div className="text-[11px] text-gray-500">
         <ModelStateBadge state={model.state} error={model.error} />
-        {model.download_strategy.startsWith("lib_managed:") ? (
-          <span className="ml-2 opacity-70">
-            via {model.download_strategy.split(":")[1]} library
-          </span>
+        {libName ? (
+          <span className="ml-2 opacity-70">via {libName} {isOllama ? "daemon" : "library"}</span>
         ) : (
           model.disk_bytes > 0 && (
             <span className="ml-2 opacity-70">{formatBytes(model.disk_bytes)} on disk</span>
@@ -157,7 +155,7 @@ function ModelStatusRow({
         )}
       </div>
       <div className="flex items-center gap-1">
-        {model.state === "not_downloaded" && (
+        {model.state === "not_downloaded" && !isOllama && (
           <Button
             onClick={() => void download(model.model_id)}
             testId={`ml-model-download-${model.model_id}`}
@@ -165,28 +163,46 @@ function ModelStatusRow({
             Download
           </Button>
         )}
+        {model.state === "not_downloaded" && isOllama && (
+          <span
+            className="text-[11px] text-gray-500"
+            title={`Run \`ollama pull ${model.model_id.replace(/^ollama:/, "")}\` from a terminal`}
+          >
+            Pull via ollama
+          </span>
+        )}
         {model.state === "downloading" && (
           <Button onClick={() => void cancel(model.model_id)} variant="danger">
             Cancel
           </Button>
         )}
-        {(model.state === "downloaded_not_loaded" ||
-          model.state === "loaded" ||
-          model.state === "error") && (
+        {(model.state === "loaded" || model.state === "error") && (
           <Button
-            onClick={() => void remove(model.model_id)}
-            disabled={featureEnabled}
-            variant="danger"
-            title={
-              featureEnabled
-                ? "Disable the feature first to remove its model"
-                : "Delete this model from disk"
-            }
+            onClick={() => void reload(model.model_id)}
+            testId={`ml-model-reload-${model.model_id}`}
+            title="Reload the model (re-runs init or warmup)"
           >
-            Remove
+            Reload
           </Button>
         )}
-        {model.state === "error" && (
+        {(model.state === "downloaded_not_loaded" ||
+          model.state === "loaded" ||
+          model.state === "error") &&
+          !isOllama && (
+            <Button
+              onClick={() => void remove(model.model_id)}
+              disabled={featureEnabled}
+              variant="danger"
+              title={
+                featureEnabled
+                  ? "Disable the feature first to remove its model"
+                  : "Delete this model from disk"
+              }
+            >
+              Remove
+            </Button>
+          )}
+        {model.state === "error" && !isOllama && (
           <Button
             onClick={() => void download(model.model_id)}
             testId={`ml-model-retry-${model.model_id}`}

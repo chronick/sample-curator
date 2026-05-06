@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { SettingsDialog } from "./SettingsDialog";
-import type { OllamaStatusDict } from "../types/ollama";
 
 const invokeMock = vi.fn();
 
@@ -13,19 +12,9 @@ vi.mock("@tauri-apps/api/app", () => ({
   getVersion: () => Promise.resolve("0.1.5"),
 }));
 
-const llmStatus: OllamaStatusDict = {
-  state: "not_loaded",
-  model: null,
-  available_models: [],
-  error: null,
-};
-
 function defaultProps() {
   return {
     onClose: vi.fn(),
-    llmStatus,
-    onRefreshLlm: vi.fn().mockResolvedValue(undefined),
-    onSetLlmModel: vi.fn().mockResolvedValue(undefined),
     onShowOrphans: vi.fn(),
   };
 }
@@ -139,13 +128,16 @@ describe("SettingsDialog tabs", () => {
     expect(screen.getByTestId("analysis-test-file")).toBeInTheDocument();
   });
 
-  it("disables the feature toggle when its model isn't downloaded", async () => {
+  it("renders the feature toggle as not-checked when feature is disabled", async () => {
     render(<SettingsDialog {...defaultProps()} />);
     fireEvent.click(screen.getByTestId("settings-tab-analysis-ml"));
 
     const toggle = await screen.findByTestId("ml-feature-toggle-embedding_similarity");
-    expect(toggle).toBeDisabled();
     expect(toggle).toHaveAttribute("aria-checked", "false");
+    // Toggle is always interactive — the model state badge below tells the
+    // user whether the feature can actually run; the toggle itself just
+    // expresses intent.
+    expect(toggle).not.toBeDisabled();
   });
 
   it("calls reveal_path when Reveal is clicked on an app data path", async () => {

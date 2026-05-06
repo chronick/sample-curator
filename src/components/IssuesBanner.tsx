@@ -1,42 +1,19 @@
 /**
- * Generic config-issues banner. Aggregates from multiple sources:
- *
- * - Ollama daemon (LLM vocal naming refinement)
- * - ML features (CLAP, Whisper, Demucs) — any enabled feature whose
- *   model isn't `loaded` is surfaced here
+ * Generic config-issues banner. Sources issues from the unified ML
+ * features store (which now includes ollama as a first-class feature
+ * after vault-kamb).
  *
  * Future sources (filed as followup): library health, audio interface
- * configuration, etc. Issues are de-duplicated by id; the banner shows
- * a single full message when there's one issue, or a count + Settings
- * link when there are multiple.
+ * configuration, etc. The banner shows a single full message when
+ * there's one issue, or a count + Settings link when there are multiple.
  */
 
 import { useEffect, useState } from "react";
-import type { OllamaStatusDict } from "../types/ollama";
 import { useMlFeaturesStore } from "../store/mlFeaturesStore";
 
 export interface Issue {
   id: string;
   message: string;
-}
-
-function deriveIssues(llm: OllamaStatusDict, mlIssues: Issue[]): Issue[] {
-  const issues: Issue[] = [];
-
-  if (llm.state === "errored") {
-    issues.push({
-      id: "llm:errored",
-      message: `LLM unavailable: ${llm.error ?? "unknown error"}`,
-    });
-  } else if (llm.state === "not_loaded") {
-    issues.push({
-      id: "llm:not_loaded",
-      message: "LLM not loaded — vocal naming requires a local model.",
-    });
-  }
-  // state === "loading" or "loaded" → no issue
-
-  return issues.concat(mlIssues);
 }
 
 function deriveMlIssues(
@@ -62,11 +39,10 @@ function deriveMlIssues(
 }
 
 interface IssuesBannerProps {
-  llmStatus: OllamaStatusDict;
   onShowSettings: () => void;
 }
 
-export function IssuesBanner({ llmStatus, onShowSettings }: IssuesBannerProps) {
+export function IssuesBanner({ onShowSettings }: IssuesBannerProps) {
   const mlStatus = useMlFeaturesStore((s) => s.status);
   const refreshMl = useMlFeaturesStore((s) => s.refresh);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
@@ -79,7 +55,7 @@ export function IssuesBanner({ llmStatus, onShowSettings }: IssuesBannerProps) {
     }
   }, [mlStatus, refreshMl]);
 
-  const allIssues = deriveIssues(llmStatus, deriveMlIssues(mlStatus));
+  const allIssues = deriveMlIssues(mlStatus);
   const fingerprint = allIssues.map((i) => i.id).sort().join("|");
 
   // Dismissal is per-fingerprint: if the issue set changes, undismiss.

@@ -741,6 +741,7 @@ fn main() {
             ml_commands::ml_remove_model,
             ml_commands::ml_load_model,
             ml_commands::ml_unload_model,
+            ml_commands::ml_reload_model,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,4 +1,4 @@
-import type { OllamaStatusDict } from "../types/ollama";
+import { MlStatusIndicator } from "./MlStatusIndicator";
 
 type ActiveView = "browse" | "jobs" | "record" | "sessions";
 
@@ -7,7 +7,6 @@ interface HeaderBarProps {
   showLeft: boolean;
   showRight: boolean;
   showPlayer: boolean;
-  llmStatus: OllamaStatusDict;
   appVersion?: string;
   onSetActiveView: (view: ActiveView) => void;
   onToggleLeft: () => void;
@@ -18,38 +17,11 @@ interface HeaderBarProps {
   onRefresh: () => void;
 }
 
-function llmDotClass(state: OllamaStatusDict["state"]): string {
-  switch (state) {
-    case "loaded":
-      return "bg-green-500";
-    case "loading":
-      return "bg-yellow-400 animate-pulse";
-    case "errored":
-      return "bg-red-500";
-    default:
-      return "bg-gray-500";
-  }
-}
-
-function llmTooltip(status: OllamaStatusDict): string {
-  switch (status.state) {
-    case "loaded":
-      return `LLM ready: ${status.model}`;
-    case "loading":
-      return `LLM loading: ${status.model ?? "detecting"}…`;
-    case "errored":
-      return `LLM error: ${status.error ?? "unknown"}`;
-    default:
-      return "LLM not loaded — click Settings to configure";
-  }
-}
-
 export function HeaderBar({
   activeView,
   showLeft,
   showRight,
   showPlayer,
-  llmStatus,
   appVersion,
   onSetActiveView,
   onToggleLeft,
@@ -118,11 +90,7 @@ export function HeaderBar({
         </div>
       </div>
       <div className="flex items-center gap-2">
-        <span
-          className={`w-3 h-3 rounded-full flex-shrink-0 ${llmDotClass(llmStatus.state)}`}
-          title={llmTooltip(llmStatus)}
-          data-testid="llm-status-dot"
-        />
+        <MlStatusIndicator onClick={onShowSettings} />
         {/* Settings */}
         <button
           onClick={onShowSettings}

@@ -128,7 +128,114 @@ fn registered_features() -> Vec<FeatureInfo> {
             kind: "stems".to_string(),
             default_model_id: "facebook/htdemucs".to_string(),
         },
+        FeatureInfo {
+            feature_id: "llm_naming_refinement".to_string(),
+            label: "LLM naming refinement".to_string(),
+            description: "Local LLM (via ollama) refines transcript-derived filenames".to_string(),
+            kind: "llm".to_string(),
+            default_model_id: "ollama:gemma3:1b".to_string(),
+        },
     ]
+}
+
+/// Helpers for the dynamic ``ollama:*`` model entries. Ollama's available
+/// models live in the daemon, not in our static registry — we fetch them at
+/// status time and merge them into the model list. Picking one in the
+/// dropdown is the same as calling ``set_ollama_model`` on the bare name.
+const OLLAMA_PREFIX: &str = "ollama:";
+
+fn fetch_ollama_status(app_state: &State<'_, AppState>) -> Option<serde_json::Value> {
+    rpc(app_state, "get_ollama_status", serde_json::json!({})).ok()
+}
+
+fn dynamic_llm_models(ollama: &serde_json::Value) -> Vec<ModelInfo> {
+    let avail = ollama
+        .get("available_models")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    avail
+        .iter()
+        .filter_map(|v| v.as_str())
+        .map(|name| ModelInfo {
+            model_id: format!("{OLLAMA_PREFIX}{name}"),
+            label: name.to_string(),
+            kind: "llm".to_string(),
+            size_estimate_mb: 0,
+            download_strategy: "lib_managed:ollama".to_string(),
+        })
+        .collect()
+}
+
+/// Translate ollama's snapshot to a model_state matching the shape that
+/// ``ml_list_model_states`` returns for HF / lib_managed:demucs models.
+///
+/// Distinguishes daemon-unreachable from daemon-up-with-no-models-pulled.
+/// Both leave ``available_models`` empty, but only the unreachable case
+/// has a non-empty ``error`` on the snapshot. Daemon unreachable surfaces
+/// as ``state = "error"`` with an actionable install message; no models
+/// pulled surfaces as ``state = "not_downloaded"``.
+fn ollama_model_state(model_id: &str, ollama: &serde_json::Value) -> serde_json::Value {
+    let model_name = model_id
+        .strip_prefix(OLLAMA_PREFIX)
+        .unwrap_or(model_id);
+    let avail_names: Vec<String> = ollama
+        .get("available_models")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    let state_str = ollama
+        .get("state")
+        .and_then(|v| v.as_str())
+        .unwrap_or("not_loaded");
+    let active_model = ollama.get("model").and_then(|v| v.as_str()).unwrap_or("");
+    let raw_error = ollama.get("error").and_then(|v| v.as_str());
+
+    let downloaded = avail_names.iter().any(|n| n == model_name);
+    let is_active = active_model == model_name;
+    // OllamaStatus reports unreachable daemon by leaving available_models
+    // empty AND setting error = "daemon unreachable" (or similar). When the
+    // daemon is reachable but no models are pulled, available_models is
+    // empty but error is None.
+    let daemon_unreachable = avail_names.is_empty() && raw_error.is_some();
+
+    let (state, error_msg) = if daemon_unreachable {
+        (
+            "error",
+            Some(
+                "ollama daemon unreachable — install via `brew install ollama` and run `ollama serve`"
+                    .to_string(),
+            ),
+        )
+    } else if !downloaded {
+        ("not_downloaded", None)
+    } else if is_active {
+        match state_str {
+            "loading" => ("loading", None),
+            "loaded" => ("loaded", None),
+            "errored" => ("error", raw_error.map(String::from)),
+            _ => ("downloaded_not_loaded", None),
+        }
+    } else {
+        ("downloaded_not_loaded", None)
+    };
+
+    serde_json::json!({
+        "model_id": model_id,
+        "state": state,
+        "downloaded": downloaded,
+        "loaded": is_active && state_str == "loaded" && !daemon_unreachable,
+        "disk_bytes": 0,
+        "error": error_msg,
+    })
+}
+
+fn is_ollama_model(model_id: &str) -> bool {
+    model_id.starts_with(OLLAMA_PREFIX)
 }
 
 // ============ Config persistence ============
@@ -250,6 +357,82 @@ fn fetch_model_states(
     serde_json::from_value(result).map_err(|e| e.to_string())
 }
 
+/// Compose status from all sources: HF / lib_managed:demucs models from the
+/// sidecar's tracker, plus dynamic ``ollama:*`` models derived from
+/// ``get_ollama_status``. Single entry point for every Tauri command that
+/// returns ``MlStatus`` — keeps the merging logic in one place.
+///
+/// The LLM dropdown always contains at least the persisted + default
+/// ``ollama:*`` model, even when the daemon is unreachable. This keeps
+/// the UI populated so the user can see which model is configured and
+/// surfaces a clear error state ("Daemon unreachable") instead of an
+/// empty dropdown.
+fn fetch_full_status(
+    config: &MlConfig,
+    app_state: &State<'_, AppState>,
+) -> MlStatus {
+    let static_ids: Vec<String> = registered_models()
+        .into_iter()
+        .map(|m| m.model_id)
+        .collect();
+    let mut states = fetch_model_states(app_state, &static_ids).unwrap_or_default();
+
+    let ollama_opt = fetch_ollama_status(app_state);
+    let mut extras: Vec<ModelInfo> = match &ollama_opt {
+        Some(o) => dynamic_llm_models(o),
+        None => vec![],
+    };
+
+    // Stamp state for everything we've already collected.
+    if let Some(ollama) = &ollama_opt {
+        for m in &extras {
+            states.insert(m.model_id.clone(), ollama_model_state(&m.model_id, ollama));
+        }
+    }
+
+    // Always include the persisted + default LLM model in the dropdown, even
+    // if the daemon is down or the model isn't pulled. The user needs to see
+    // *something* — empty dropdown reads as "broken UI", not "fix your env".
+    let llm_default = registered_features()
+        .into_iter()
+        .find(|f| f.feature_id == "llm_naming_refinement")
+        .map(|f| f.default_model_id);
+    let llm_persisted = config
+        .features
+        .get("llm_naming_refinement")
+        .map(|f| f.model_id.clone());
+    for candidate in [llm_persisted, llm_default].into_iter().flatten() {
+        if !candidate.starts_with(OLLAMA_PREFIX) {
+            continue;
+        }
+        if extras.iter().any(|m| m.model_id == candidate) {
+            continue;
+        }
+        let bare = candidate.strip_prefix(OLLAMA_PREFIX).unwrap_or(&candidate);
+        extras.push(ModelInfo {
+            model_id: candidate.clone(),
+            label: bare.to_string(),
+            kind: "llm".to_string(),
+            size_estimate_mb: 0,
+            download_strategy: "lib_managed:ollama".to_string(),
+        });
+        let synthetic_state = match &ollama_opt {
+            Some(o) => ollama_model_state(&candidate, o),
+            None => serde_json::json!({
+                "model_id": candidate,
+                "state": "error",
+                "downloaded": false,
+                "loaded": false,
+                "disk_bytes": 0,
+                "error": "ollama daemon unreachable — install via `brew install ollama` and run `ollama serve`",
+            }),
+        };
+        states.insert(candidate, synthetic_state);
+    }
+
+    build_status(config, &states, extras)
+}
+
 // ============ Public response shapes ============
 
 #[derive(Debug, Serialize)]
@@ -280,6 +463,7 @@ pub struct MlModelView {
 fn build_status(
     config: &MlConfig,
     sidecar_states: &HashMap<String, serde_json::Value>,
+    extra_models: Vec<ModelInfo>,
 ) -> MlStatus {
     let features: Vec<MlFeatureView> = registered_features()
         .into_iter()
@@ -300,7 +484,10 @@ fn build_status(
         })
         .collect();
 
-    let models: Vec<MlModelView> = registered_models()
+    let mut all_models = registered_models();
+    all_models.extend(extra_models);
+
+    let models: Vec<MlModelView> = all_models
         .into_iter()
         .map(|info| {
             let s = sidecar_states.get(&info.model_id);
@@ -347,21 +534,20 @@ pub fn ml_get_status(
     app_state: State<'_, AppState>,
 ) -> Result<MlStatus, String> {
     let config = cfg.snapshot()?;
-    let model_ids: Vec<String> = registered_models()
-        .into_iter()
-        .map(|m| m.model_id)
-        .collect();
-    let states = fetch_model_states(&app_state, &model_ids).unwrap_or_default();
+    let snapshot = fetch_full_status(&config, &app_state);
 
     // First call after app start: kick off background loads for any enabled
     // feature whose model is downloaded but not yet loaded. Subsequent calls
-    // are pure reads. Sidecar load_model is async (returns immediately) so
-    // this doesn't block the status RPC.
+    // are pure reads. Load is async (returns immediately) so this doesn't
+    // block the status RPC. Ollama warmup is handled by the sidecar's own
+    // startup thread, so we only auto-load HF / lib_managed:demucs.
     if !cfg.autoload_done.swap(true, Ordering::SeqCst) {
         let mut already_kicked: std::collections::HashSet<String> = Default::default();
-        let snapshot = build_status(&config, &states);
         for feat in &snapshot.features {
             if !feat.enabled {
+                continue;
+            }
+            if is_ollama_model(&feat.model_id) {
                 continue;
             }
             if !already_kicked.insert(feat.model_id.clone()) {
@@ -377,12 +563,45 @@ pub fn ml_get_status(
                 }
             }
         }
-        // Re-fetch states so the response reflects any "loading" we just kicked off.
-        let states2 = fetch_model_states(&app_state, &model_ids).unwrap_or_default();
-        return Ok(build_status(&config, &states2));
+        // Re-fetch so the response reflects any "loading" we just kicked off.
+        return Ok(fetch_full_status(&config, &app_state));
     }
 
-    Ok(build_status(&config, &states))
+    Ok(snapshot)
+}
+
+/// Trigger a load for ``model_id``. Dispatches to ``set_ollama_model`` for
+/// ``ollama:*`` IDs (warms the daemon) or ``ml_load_model`` for HF /
+/// lib_managed models. Best-effort — errors are reflected in subsequent
+/// status fetches, not surfaced to the caller.
+fn dispatch_load(app_state: &State<'_, AppState>, model_id: &str) {
+    if is_ollama_model(model_id) {
+        let bare = model_id.strip_prefix(OLLAMA_PREFIX).unwrap_or(model_id);
+        let _ = rpc(
+            app_state,
+            "set_ollama_model",
+            serde_json::json!({ "model": bare }),
+        );
+    } else {
+        let _ = rpc(
+            app_state,
+            "ml_load_model",
+            serde_json::json!({ "model_id": model_id }),
+        );
+    }
+}
+
+/// Trigger an unload for ``model_id``. Ollama models are managed externally
+/// (the daemon keeps them in memory); we treat unload as a no-op there.
+fn dispatch_unload(app_state: &State<'_, AppState>, model_id: &str) {
+    if is_ollama_model(model_id) {
+        return;
+    }
+    let _ = rpc(
+        app_state,
+        "ml_unload_model",
+        serde_json::json!({ "model_id": model_id }),
+    );
 }
 
 #[tauri::command]
@@ -416,33 +635,18 @@ pub fn ml_set_feature_enabled(
     })?;
 
     if enabled {
-        // Try to load the model. Best-effort: if download missing or lib
-        // missing, sidecar surfaces the error in subsequent get_status.
-        let _ = rpc(
-            &app_state,
-            "ml_load_model",
-            serde_json::json!({ "model_id": prev_model.clone() }),
-        );
+        dispatch_load(&app_state, &prev_model);
     } else {
         // Unload only if no other enabled feature depends on this model.
         let still_referenced = updated.features.iter().any(|(fid, fs)| {
             fid != &feature_id && fs.enabled && fs.model_id == prev_model
         });
         if !still_referenced {
-            let _ = rpc(
-                &app_state,
-                "ml_unload_model",
-                serde_json::json!({ "model_id": prev_model.clone() }),
-            );
+            dispatch_unload(&app_state, &prev_model);
         }
     }
 
-    let model_ids: Vec<String> = registered_models()
-        .into_iter()
-        .map(|m| m.model_id)
-        .collect();
-    let states = fetch_model_states(&app_state, &model_ids).unwrap_or_default();
-    Ok(build_status(&updated, &states))
+    Ok(fetch_full_status(&updated, &app_state))
 }
 
 #[tauri::command]
@@ -456,14 +660,25 @@ pub fn ml_set_feature_model(
         .into_iter()
         .find(|f| f.feature_id == feature_id)
         .ok_or_else(|| format!("Unknown feature: {feature_id}"))?;
-    let target_model = registered_models()
-        .into_iter()
-        .find(|m| m.model_id == model_id)
-        .ok_or_else(|| format!("Unknown model: {model_id}"))?;
-    if target_model.kind != info.kind {
+
+    // Compatibility check. Static models live in registered_models();
+    // ollama models are dynamic (kind always "llm"), so for ``ollama:*``
+    // IDs we trust the kind and skip the static lookup.
+    if !is_ollama_model(&model_id) {
+        let target_model = registered_models()
+            .into_iter()
+            .find(|m| m.model_id == model_id)
+            .ok_or_else(|| format!("Unknown model: {model_id}"))?;
+        if target_model.kind != info.kind {
+            return Err(format!(
+                "Model {} (kind={}) is not compatible with feature {} (kind={})",
+                model_id, target_model.kind, feature_id, info.kind
+            ));
+        }
+    } else if info.kind != "llm" {
         return Err(format!(
-            "Model {} (kind={}) is not compatible with feature {} (kind={})",
-            model_id, target_model.kind, feature_id, info.kind
+            "Ollama model {} can only be assigned to llm-kind features",
+            model_id
         ));
     }
 
@@ -488,25 +703,12 @@ pub fn ml_set_feature_model(
             fid != &feature_id && fs.enabled && fs.model_id == prev_state.model_id
         });
         if !prev_still {
-            let _ = rpc(
-                &app_state,
-                "ml_unload_model",
-                serde_json::json!({ "model_id": prev_state.model_id }),
-            );
+            dispatch_unload(&app_state, &prev_state.model_id);
         }
-        let _ = rpc(
-            &app_state,
-            "ml_load_model",
-            serde_json::json!({ "model_id": model_id.clone() }),
-        );
+        dispatch_load(&app_state, &model_id);
     }
 
-    let model_ids: Vec<String> = registered_models()
-        .into_iter()
-        .map(|m| m.model_id)
-        .collect();
-    let states = fetch_model_states(&app_state, &model_ids).unwrap_or_default();
-    Ok(build_status(&updated, &states))
+    Ok(fetch_full_status(&updated, &app_state))
 }
 
 #[tauri::command]
@@ -514,6 +716,12 @@ pub fn ml_download_model(
     model_id: String,
     app_state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    if is_ollama_model(&model_id) {
+        let bare = model_id.strip_prefix(OLLAMA_PREFIX).unwrap_or(&model_id);
+        return Err(format!(
+            "Ollama models are managed by the daemon. Pull from a terminal: `ollama pull {bare}`"
+        ));
+    }
     rpc(
         &app_state,
         "ml_download_model",
@@ -550,6 +758,12 @@ pub fn ml_remove_model(
             "Model {model_id} is in use by an enabled feature. Disable the feature or pick a different model first."
         ));
     }
+    if is_ollama_model(&model_id) {
+        let bare = model_id.strip_prefix(OLLAMA_PREFIX).unwrap_or(&model_id);
+        return Err(format!(
+            "Ollama models are managed by the daemon. Remove from a terminal: `ollama rm {bare}`"
+        ));
+    }
     rpc(
         &app_state,
         "ml_remove_model",
@@ -562,6 +776,14 @@ pub fn ml_load_model(
     model_id: String,
     app_state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    if is_ollama_model(&model_id) {
+        let bare = model_id.strip_prefix(OLLAMA_PREFIX).unwrap_or(&model_id);
+        return rpc(
+            &app_state,
+            "set_ollama_model",
+            serde_json::json!({ "model": bare }),
+        );
+    }
     rpc(
         &app_state,
         "ml_load_model",
@@ -574,9 +796,30 @@ pub fn ml_unload_model(
     model_id: String,
     app_state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
+    if is_ollama_model(&model_id) {
+        // Ollama keeps loaded models warm in the daemon; we don't manage that
+        // memory. Treat unload as a no-op so toggle-off is consistent.
+        return Ok(serde_json::json!({ "noop": true }));
+    }
     rpc(
         &app_state,
         "ml_unload_model",
         serde_json::json!({ "model_id": model_id }),
     )
+}
+
+/// Reload a model: unload + load. Useful for recovering from transient
+/// errors or after the user has updated weights manually. Doesn't touch
+/// the persisted ``enabled`` state. For ollama models, this re-runs warmup
+/// via ``set_ollama_model``.
+#[tauri::command]
+pub fn ml_reload_model(
+    model_id: String,
+    cfg: State<'_, MlConfigState>,
+    app_state: State<'_, AppState>,
+) -> Result<MlStatus, String> {
+    dispatch_unload(&app_state, &model_id);
+    dispatch_load(&app_state, &model_id);
+    let config = cfg.snapshot()?;
+    Ok(fetch_full_status(&config, &app_state))
 }
