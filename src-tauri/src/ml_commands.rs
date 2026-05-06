@@ -353,14 +353,15 @@ fn probe_ollama_availability(ollama: Option<&serde_json::Value>) -> (bool, Optio
     }
 }
 
-/// Probe Apple Foundation Models availability. Slice 1: stub returning
-/// (false, "coming next") so the backend appears in the UI but cannot be
-/// selected. Slice 3 replaces this with the real Swift-bridge probe.
+/// Probe Apple Foundation Models availability via the Swift bridge.
 fn probe_foundation_availability() -> (bool, Option<String>) {
-    (
-        false,
-        Some("Coming next: requires macOS 15.1+, Apple Silicon, Apple Intelligence enabled".to_string()),
-    )
+    let available = crate::foundation_models::available();
+    let reason = if available {
+        None
+    } else {
+        crate::foundation_models::unavailable_reason()
+    };
+    (available, reason)
 }
 
 // ============ Config persistence ============

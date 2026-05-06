@@ -202,6 +202,11 @@ pub struct SidecarNamingFields {
     pub method: String,
     pub alternative: Option<String>,
     pub alternative_method: Option<String>,
+    /// Set when the LLM feature is on and the active backend is
+    /// ``foundation`` — the sidecar transcribed but didn't refine, so the
+    /// caller should run the transcript through the Apple Foundation
+    /// Models Swift bridge and replace the stem.
+    pub transcript_for_external_refine: Option<String>,
 }
 
 /// Parse the sidecar response and return its fields on success.
@@ -232,12 +237,17 @@ pub fn parse_sidecar_response(response: &str) -> Option<SidecarNamingFields> {
         .get("alternative_method")
         .and_then(|v| v.as_str())
         .map(String::from);
+    let transcript_for_external_refine = result
+        .get("transcript_for_external_refine")
+        .and_then(|v| v.as_str())
+        .map(String::from);
     Some(SidecarNamingFields {
         stem,
         tags,
         method,
         alternative,
         alternative_method,
+        transcript_for_external_refine,
     })
 }
 

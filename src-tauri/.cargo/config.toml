@@ -1,0 +1,11 @@
+# macOS deployment target. Bumped from cargo's default of 11.0 to 15.0 so
+# the linker doesn't insert Swift Concurrency back-deployment references
+# that resolve to ``@rpath/libswift_Concurrency.dylib`` (a path that doesn't
+# exist on modern macOS, where the runtime is in the dyld shared cache).
+#
+# Required for the Apple Foundation Models bridge in
+# ``src/foundation_models.rs`` (vault-3ume) — the Swift static library
+# linked via swift-rs targets macOS 15+, and the Rust binary needs to
+# match or the dynamic linker fails on ``cargo run``.
+[env]
+MACOSX_DEPLOYMENT_TARGET = "15.0"

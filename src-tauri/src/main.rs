@@ -11,6 +11,7 @@ mod audio;
 mod categorization;
 mod db_commands;
 mod duplicates;
+mod foundation_models;
 mod import_commands;
 mod jobs;
 mod ml_commands;
@@ -578,10 +579,56 @@ fn auto_name_recording(
             return naming::fallback_rename(path);
         }
     };
-    let safe_stem = naming::sanitize_stem(&fields.stem);
+
+    // Apple Foundation Models post-hoc refinement (vault-3ume slice 3).
+    // When the user has the LLM feature on with the foundation backend,
+    // the sidecar transcribed but didn't refine — it left the transcript
+    // in `transcript_for_external_refine`. Run it through the Swift
+    // bridge here and override the stem if FM produced something usable.
+    let (final_stem, final_method, final_alt, final_alt_method) =
+        if let Some(transcript) = fields.transcript_for_external_refine.as_deref() {
+            let prompt = format_fm_prompt(transcript);
+            match foundation_models::refine(&prompt) {
+                Some(raw) => {
+                    let sanitized = naming::sanitize_stem(&raw);
+                    if sanitized.is_empty() || sanitized == "recording" {
+                        // FM returned junk — keep mechanical stem.
+                        (
+                            fields.stem.clone(),
+                            fields.method.clone(),
+                            fields.alternative.clone(),
+                            fields.alternative_method.clone(),
+                        )
+                    } else {
+                        // Promote the FM output to primary; demote the
+                        // mechanical stem to alt for A/B inspection.
+                        (
+                            sanitized,
+                            "llm".to_string(),
+                            Some(fields.stem.clone()),
+                            Some("transcription".to_string()),
+                        )
+                    }
+                }
+                None => (
+                    fields.stem.clone(),
+                    fields.method.clone(),
+                    fields.alternative.clone(),
+                    fields.alternative_method.clone(),
+                ),
+            }
+        } else {
+            (
+                fields.stem.clone(),
+                fields.method.clone(),
+                fields.alternative.clone(),
+                fields.alternative_method.clone(),
+            )
+        };
+
+    let safe_stem = naming::sanitize_stem(&final_stem);
     let new_path = naming::rename_with_stem(path, &safe_stem);
-    let sanitized_alt = fields
-        .alternative
+    let sanitized_alt = final_alt
         .as_deref()
         .map(naming::sanitize_stem)
         .filter(|s| !s.is_empty());
@@ -589,10 +636,27 @@ fn auto_name_recording(
         new_path,
         stem: safe_stem,
         tags: fields.tags,
-        method: fields.method,
+        method: final_method,
         alternative: sanitized_alt,
-        alternative_method: fields.alternative_method,
+        alternative_method: final_alt_method,
     }
+}
+
+/// Mirror of the prompt template used by the ollama / hf backends in the
+/// sidecar. Kept in sync manually — small enough that drift is easy to
+/// catch in review.
+fn format_fm_prompt(transcript: &str) -> String {
+    format!(
+        "You are naming a short vocal audio sample for a music producer's sample library.\n\n\
+         Transcript: \"{}\"\n\n\
+         Produce a memorable 2-4 word filename stem. Rules:\n\
+         - Lowercase only, words joined by hyphens (e.g. 'eternal-wave-chant')\n\
+         - Use evocative content words (nouns, strong verbs); skip filler\n\
+         - Max 40 characters total\n\
+         - Return ONLY the stem — no quotes, no explanation, no trailing punctuation\n\n\
+         Stem:",
+        transcript.trim()
+    )
 }
 
 fn main() {
@@ -743,6 +807,9 @@ fn main() {
             ml_commands::ml_load_model,
             ml_commands::ml_unload_model,
             ml_commands::ml_reload_model,
+            // Apple Foundation Models bridge (vault-3ume)
+            foundation_models::llm_foundation_refine,
+            foundation_models::llm_foundation_availability,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

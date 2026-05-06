@@ -619,6 +619,11 @@ def name_recording(
     # stashed in the response under `alternative` so the UI can surface both.
     alternative_stem: str | None = None
     alternative_method: str | None = None
+    # When the foundation backend is active for the LLM feature, refinement
+    # has to happen on the Rust side (Swift bridge — the sidecar can't call
+    # FoundationModels.framework). We surface the transcript here so the
+    # caller can do post-hoc refinement and override the stem.
+    transcript_for_external_refine: str | None = None
 
     if use_transcription and features is not None:
         looks_vocal = clap_says_vocal or _looks_like_speech(features)
@@ -650,6 +655,20 @@ def name_recording(
                     if not clap_says_vocal:
                         tags = ["vocal"]
 
+                # Stash the transcript for the foundation backend so Rust
+                # can refine via the Swift bridge and override the stem.
+                # ``llm_stem`` is None for foundation (refine_transcript
+                # short-circuits) so the mechanical/heroku path picked the
+                # current ``base``.
+                if use_llm and not llm_stem:
+                    try:
+                        from sample_curation_api.llm import get_active_backend
+
+                        if get_active_backend() == "foundation":
+                            transcript_for_external_refine = transcript
+                    except Exception:
+                        pass
+
     if base is None and features is not None:
         heur = _heuristic_tag_from_features(features)
         if heur:
@@ -676,4 +695,6 @@ def name_recording(
     if alternative_stem:
         result["alternative"] = alternative_stem
         result["alternative_method"] = alternative_method
+    if transcript_for_external_refine:
+        result["transcript_for_external_refine"] = transcript_for_external_refine
     return result

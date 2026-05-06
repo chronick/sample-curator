@@ -41,6 +41,18 @@ Stem:"""
 ML_CONFIG_PATH = Path.home() / ".music-hub-data" / "ml-features-config.json"
 
 
+def get_active_backend() -> str | None:
+    """Return the backend currently selected for the LLM feature, or
+    ``None`` if the feature is disabled or no config is on disk.
+    Used by ``naming.py`` to decide whether to surface
+    ``transcript_for_external_refine`` (foundation backend = Rust handles
+    refinement post-hoc via the Swift bridge)."""
+    backend, _model_id, enabled = _load_active_llm_config()
+    if not enabled:
+        return None
+    return backend
+
+
 def _load_active_llm_config() -> tuple[str | None, str | None, bool]:
     """Read the active LLM feature config from disk.
 
