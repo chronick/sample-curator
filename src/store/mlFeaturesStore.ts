@@ -1,10 +1,19 @@
 /**
- * ML features store (vault-knuo). Manages feature toggles + model
- * lifecycle (download, load, unload, remove) by proxying through the
- * `ml_*` Tauri commands.
+ * ML features store. Manages feature toggles + model lifecycle (download,
+ * load, unload, remove) by proxying through the `ml_*` Tauri commands.
+ *
+ * Three-layer mental model (vault-3ume):
+ *
+ * - **Backends** (foundation / ollama / hf) — execution providers, each
+ *   with its own model list and availability state.
+ * - **Models** — owned by a backend. HF models are static; ollama models
+ *   are dynamic; foundation has a synthetic system-default.
+ * - **Features** — multi-backend or single-backend. The LLM feature
+ *   exposes all three; everything else is HF-only and the UI hides
+ *   the backend selector.
  *
  * Polls while any model is in a transient state (`downloading`,
- * `loading`) so progress reflects on the UI without pushing events.
+ * `loading`) so progress reflects on the UI without push events.
  */
 
 import { create } from "zustand";
@@ -17,15 +26,19 @@ export type ModelState =
   | "loading"
   | "loaded"
   | "update_available"
-  | "error";
+  | "error"
+  | "not_available";
 
 export interface MlFeatureView {
   feature_id: string;
   label: string;
   description: string;
   kind: string;
+  backends: string[];
+  default_backend: string;
   default_model_id: string;
   enabled: boolean;
+  backend: string;
   model_id: string;
 }
 
@@ -34,7 +47,12 @@ export interface MlModelView {
   label: string;
   kind: string;
   size_estimate_mb: number;
-  /** ``hf`` or ``lib_managed:<lib>`` — drives the "via X library" hint. */
+  /** Backend that owns this model — "foundation" | "ollama" | "hf". */
+  backend: string;
+  /**
+   * `hf` (default), `lib_managed:<lib>`, `lib_managed:ollama`, or `system`
+   * (OS-provided, no download). Drives "via X library" hint.
+   */
   download_strategy: string;
   state: ModelState;
   downloaded: boolean;
@@ -43,9 +61,18 @@ export interface MlModelView {
   error: string | null;
 }
 
+export interface MlBackendView {
+  backend_id: string;
+  label: string;
+  description: string;
+  available: boolean;
+  unavailable_reason: string | null;
+}
+
 export interface MlStatus {
   features: MlFeatureView[];
   models: MlModelView[];
+  backends: MlBackendView[];
 }
 
 interface MlFeaturesState {
@@ -56,6 +83,7 @@ interface MlFeaturesState {
 
   refresh: () => Promise<void>;
   setFeatureEnabled: (featureId: string, enabled: boolean) => Promise<void>;
+  setFeatureBackend: (featureId: string, backend: string) => Promise<void>;
   setFeatureModel: (featureId: string, modelId: string) => Promise<void>;
   download: (modelId: string) => Promise<void>;
   cancel: (modelId: string) => Promise<void>;
@@ -97,6 +125,17 @@ export const useMlFeaturesStore = create<MlFeaturesState>((set, get) => ({
     set({ error: null });
     try {
       const status = await invoke<MlStatus>("ml_set_feature_enabled", { featureId, enabled });
+      set({ status });
+      if (isTransient(status)) get().startPolling();
+    } catch (e) {
+      set({ error: e instanceof Error ? e.message : String(e) });
+    }
+  },
+
+  async setFeatureBackend(featureId, backend) {
+    set({ error: null });
+    try {
+      const status = await invoke<MlStatus>("ml_set_feature_backend", { featureId, backend });
       set({ status });
       if (isTransient(status)) get().startPolling();
     } catch (e) {

@@ -23,10 +23,13 @@ function deriveMlIssues(
   const issues: Issue[] = [];
   for (const f of status.features) {
     if (!f.enabled) continue;
-    const model = status.models.find((m) => m.model_id === f.model_id);
+    const model = status.models.find(
+      (m) => m.model_id === f.model_id && m.backend === f.backend,
+    );
     if (!model) continue;
     if (model.state === "loaded" || model.state === "loading") continue;
     if (model.state === "downloading") continue; // user-visible inside Settings already
+    if (model.state === "not_available") continue; // surfaced inline in Settings
     issues.push({
       id: `ml:${f.feature_id}:${model.state}`,
       message:

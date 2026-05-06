@@ -39,7 +39,9 @@ function aggregate(status: MlStatus | null): Aggregate {
   for (const f of status.features) {
     if (!f.enabled) continue;
     enabled += 1;
-    const m = status.models.find((mm) => mm.model_id === f.model_id);
+    const m = status.models.find(
+      (mm) => mm.model_id === f.model_id && mm.backend === f.backend,
+    );
     if (!m) continue;
     if (m.state === "loaded") {
       loaded += 1;
@@ -52,6 +54,12 @@ function aggregate(status: MlStatus | null): Aggregate {
     if (m.state === "error") {
       errors += 1;
       issues.push(`${f.label}: ${m.error ?? "error"}`);
+      continue;
+    }
+    if (m.state === "not_available") {
+      // Backend unavailable on this system. Surfaced in Settings — don't
+      // double-report on the header dot.
+      issues.push(`${f.label}: backend unavailable`);
       continue;
     }
     unloaded += 1;

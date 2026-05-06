@@ -735,6 +735,7 @@ fn main() {
             // ML features tab — feature toggles + on-demand model manager (vault-knuo)
             ml_commands::ml_get_status,
             ml_commands::ml_set_feature_enabled,
+            ml_commands::ml_set_feature_backend,
             ml_commands::ml_set_feature_model,
             ml_commands::ml_download_model,
             ml_commands::ml_cancel_download,
