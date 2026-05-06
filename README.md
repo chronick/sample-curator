@@ -57,27 +57,50 @@ This starts both the Vite dev server and Tauri app.
 
 ### 4. Enable LLM Vocal Naming (Optional)
 
-Vocal samples are transcribed by Whisper and can be further refined by a local LLM into more evocative filenames (e.g. *'we ride the eternal wave'* → *'eternal-wave-chant'* instead of the mechanical *'ride-eternal-wave'*). Without this, the LLM tier is silently skipped and the mechanical name is used.
+Vocal samples are transcribed by Whisper and can be further refined by a local LLM into more evocative filenames (e.g. *'we ride the eternal wave'* → *'eternal-wave-chant'* instead of the mechanical *'ride-eternal-wave'*). Configure backend + model in **Settings → Analysis & ML → LLM naming refinement**. Without an LLM, the mechanical stem is used.
+
+Three backends; pick one (or pick whichever's available):
+
+#### Apple Foundation Models — zero install
+
+Built into macOS. No download, no daemon. Requires:
+
+- **macOS 26.0** or later
+- **Apple Silicon** Mac (M1+)
+- **Apple Intelligence** turned on in *System Settings → Apple Intelligence*
+
+When all three are met, the *Apple Foundation Models* entry in the backend dropdown is selectable. Otherwise it surfaces a specific reason.
+
+#### Ollama — fast quantized inference
+
+Self-hosted local daemon. Faster than HF transformers, but you install it.
 
 ```bash
 # 1. Install ollama
-brew install ollama
-# or: download from https://ollama.com/download
+brew install ollama   # or: https://ollama.com/download
 
 # 2. Start the daemon
 brew services start ollama
 # or: `ollama serve` to run in the foreground
 
 # 3. Pull a small, fast model (one-time)
-#    The sidecar auto-detects the first match from this ranked list:
-#      gemma4:e2b → gemma3:1b → qwen2.5:3b
 ollama pull gemma3:1b
 
-# 4. Install the LLM sidecar extra
+# 4. Install the ollama sidecar client
 cd sidecar && uv sync --extra llm
 ```
 
-To use a different model, either set `SAMPLE_CURATOR_OLLAMA_MODEL=<model-tag>` in the environment before launching the app (hard override, disables auto-detect), or persist a choice via the `set_ollama_model` RPC.
+In Settings, pick *Ollama* as the backend and select the model from the dropdown. The dropdown lists models reported by `ollama list`.
+
+#### HuggingFace Transformers — runs in the sidecar
+
+Python `transformers.AutoModelForCausalLM`. No daemon, no external install — but the first download is ~1 GB for the default Qwen 2.5 0.5B Instruct.
+
+```bash
+cd sidecar && uv sync --extra llm-hf
+```
+
+In Settings, pick *HuggingFace Transformers* as the backend, click **Download** on the model row, then toggle the feature on.
 
 ## Usage
 
