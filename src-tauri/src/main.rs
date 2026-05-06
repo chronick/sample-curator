@@ -13,6 +13,7 @@ mod db_commands;
 mod duplicates;
 mod import_commands;
 mod jobs;
+mod ml_commands;
 mod orphans;
 mod projects;
 mod recorder;
@@ -28,6 +29,7 @@ use db_commands::DbState;
 use duplicates::DuplicateState;
 use import_commands::ImportState;
 use jobs::JobState;
+use ml_commands::MlConfigState;
 use projects::ProjectState;
 use search::SearchState;
 use recorder::{RecorderState, RecorderConfigState};
@@ -620,6 +622,7 @@ fn main() {
         .manage(JobState::new())
         .manage(RecorderState::new())
         .manage(RecorderConfigState::new())
+        .manage(MlConfigState::new())
         .invoke_handler(tauri::generate_handler![
             sidecar_call,
             get_app_versions,
@@ -729,6 +732,15 @@ fn main() {
             orphans::scan_orphaned_recordings,
             orphans::delete_orphaned_recording,
             orphans::import_orphaned_recording,
+            // ML features tab — feature toggles + on-demand model manager (vault-knuo)
+            ml_commands::ml_get_status,
+            ml_commands::ml_set_feature_enabled,
+            ml_commands::ml_set_feature_model,
+            ml_commands::ml_download_model,
+            ml_commands::ml_cancel_download,
+            ml_commands::ml_remove_model,
+            ml_commands::ml_load_model,
+            ml_commands::ml_unload_model,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

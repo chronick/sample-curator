@@ -21,7 +21,7 @@ import { SpectralColorWheel } from "./components/SpectralColorWheel";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { DragHandle } from "./components/DragHandle";
 import { HeaderBar } from "./components/HeaderBar";
-import { OllamaBanner } from "./components/OllamaBanner";
+import { IssuesBanner } from "./components/IssuesBanner";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { useLibrary } from "./hooks/useLibrary";
 import { useOllamaStatus } from "./hooks/useOllamaStatus";
@@ -301,7 +301,7 @@ function AppContent() {
         onRefresh={refresh}
       />
       <UpdateBanner />
-      <OllamaBanner status={llmStatus} onShowSettings={() => setShowSettings(true)} />
+      <IssuesBanner llmStatus={llmStatus} onShowSettings={() => setShowSettings(true)} />
 
       {/* Main content */}
       <div className="flex flex-1 overflow-hidden">

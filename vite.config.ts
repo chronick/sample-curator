@@ -10,6 +10,13 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
+    watch: {
+      // Sidecar venv ships thousands of HTML test fixtures (torch, coverage,
+      // setuptools, etc.) that would otherwise trigger a page reload every
+      // time someone runs `uv sync --extra <X>`. Other dotdirs ignored for
+      // good measure — Vite's default already skips `node_modules`.
+      ignored: ["**/.venv/**", "**/.git/**", "**/.beads/**", "**/sidecar/dist/**"],
+    },
   },
   envPrefix: ["VITE_", "TAURI_"],
   build: {

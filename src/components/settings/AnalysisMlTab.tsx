@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { getNativeQuality, getNativeAudioInfo } from "../../hooks/useNativeAnalysis";
 import { RANKED_MODELS, type OllamaStatusDict } from "../../types/ollama";
 import { Section, Button } from "./shared";
+import { MlFeaturesSection } from "./MlFeaturesSection";
 
 export function AnalysisMlTab({
   llmStatus,
@@ -152,18 +153,7 @@ export function AnalysisMlTab({
         </div>
       </Section>
 
-      <Section title="ML features">
-        <div
-          className="text-xs text-gray-500 bg-surface border border-dashed border-surface-border rounded p-4 text-center"
-          data-testid="ml-features-empty"
-        >
-          <p className="text-gray-400 mb-1">No ML features installed yet.</p>
-          <p>
-            Downloadable models (CLAP embeddings, stem separation, etc.) will appear here. Coming with the
-            model manager.
-          </p>
-        </div>
-      </Section>
+      <MlFeaturesSection />
     </div>
   );
 }

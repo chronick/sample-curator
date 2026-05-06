@@ -7,6 +7,14 @@ This module now only handles ML-related features (future: captioning, semantic s
 import platform
 import sys
 
+from sample_curation_api.models import (
+    cancel_download as ml_cancel_download,
+    download_model as ml_download_model,
+    list_model_states as ml_list_model_states,
+    load_model as ml_load_model,
+    remove_model as ml_remove_model,
+    unload_model as ml_unload_model,
+)
 from sample_curation_api.naming import name_recording
 from sample_curation_api.ollama_status import (
     OllamaStatus,
@@ -79,6 +87,13 @@ HANDLERS = {
     "get_ollama_status": get_ollama_status,
     "set_ollama_model": set_ollama_model,
     "refresh_ollama_status": refresh_ollama_status,
+    # ML model lifecycle (vault-knuo) — Rust ml_commands.rs proxies these.
+    "ml_list_model_states": ml_list_model_states,
+    "ml_download_model": ml_download_model,
+    "ml_cancel_download": ml_cancel_download,
+    "ml_remove_model": ml_remove_model,
+    "ml_load_model": ml_load_model,
+    "ml_unload_model": ml_unload_model,
     # Future: "caption_sample": caption_sample,
     # Future: "semantic_search": semantic_search,
 }

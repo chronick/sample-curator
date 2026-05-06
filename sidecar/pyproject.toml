@@ -26,6 +26,10 @@ dependencies = [
     "librosa>=0.10.0",
     # Pin numba to version compatible with Python 3.11+
     "numba>=0.56.0",
+    # Model weight downloads (vault-knuo). Lightweight (~600KB) — keeps the
+    # ML features tab functional even on the bundled-sidecar install where
+    # ML libs (torch/laion-clap/whisper/demucs) aren't shipped.
+    "huggingface-hub>=0.20",
 ]
 
 [project.optional-dependencies]
@@ -50,10 +54,19 @@ fingerprint = [
     "pyacoustid>=1.3.0",
 ]
 
-# CLAP embeddings for similarity search
+# CLAP embeddings for similarity search.
+#
+# The HF mirror at ``laion/clap-htsat-unfused`` ships transformers-format
+# weights, not the laion-clap library's original ``.pt`` format. The
+# ML-features tab loads via ``transformers.ClapModel``; ``laion-clap``
+# stays available because ``naming.py`` still uses it for zero-shot
+# classification on a different (LAION-format) checkpoint.
 embedding = [
-    "laion-clap>=1.1.0",
+    "transformers>=4.40",
     "torch>=2.0.0",
+    "laion-clap>=1.1.0",
+    # laion-clap imports torchvision but doesn't declare it as a runtime dep.
+    "torchvision>=0.15.0",
 ]
 
 # Stem separation
