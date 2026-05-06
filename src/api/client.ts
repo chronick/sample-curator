@@ -485,7 +485,36 @@ export const api = {
   async sidecarCall<T>(method: string, params?: Record<string, unknown>): Promise<T> {
     return rpcCall<T>(method, params);
   },
+
+  // ============ App Info ============
+
+  /**
+   * Consolidated version info for the About panel.
+   *
+   * `sidecar` is `null` if the Python sidecar hasn't started yet
+   * (lazy on first ML call). The Rust side does NOT auto-start the
+   * sidecar for this query.
+   */
+  async getAppVersions(): Promise<AppVersions> {
+    return invoke<AppVersions>("get_app_versions");
+  },
 };
+
+export interface SidecarInfo {
+  package_version: string;
+  python_version: string;
+  python_implementation: string;
+  platform: string;
+  executable: string;
+  is_frozen: boolean;
+}
+
+export interface AppVersions {
+  app: string;
+  tauri: string;
+  os: string;
+  sidecar: SidecarInfo | null;
+}
 
 /** Job statistics response */
 export interface JobStatusResponse {

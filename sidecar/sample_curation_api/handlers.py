@@ -4,6 +4,9 @@ DB operations have been migrated to native Rust Tauri commands (db_commands.rs).
 This module now only handles ML-related features (future: captioning, semantic search).
 """
 
+import platform
+import sys
+
 from sample_curation_api.naming import name_recording
 from sample_curation_api.ollama_status import (
     OllamaStatus,
@@ -12,10 +15,38 @@ from sample_curation_api.ollama_status import (
     set_model,
 )
 
+try:
+    from importlib.metadata import version as _pkg_version
+except ImportError:  # pragma: no cover — Python <3.8
+    _pkg_version = None  # type: ignore[assignment]
+
 
 def ping() -> str:
     """Health check."""
     return "pong"
+
+
+def get_sidecar_info() -> dict:
+    """Return version info about the running sidecar.
+
+    Surfaced in Settings → About so users can confirm which interpreter
+    + sidecar package they're talking to (matters more once we bundle
+    the sidecar into the .dmg via PyInstaller — see vault-3bd8).
+    """
+    pkg_version = "unknown"
+    if _pkg_version is not None:
+        try:
+            pkg_version = _pkg_version("sample-curation-api")
+        except Exception:
+            pass
+    return {
+        "package_version": pkg_version,
+        "python_version": platform.python_version(),
+        "python_implementation": platform.python_implementation(),
+        "platform": platform.platform(),
+        "executable": sys.executable,
+        "is_frozen": getattr(sys, "frozen", False),
+    }
 
 
 def get_ollama_status() -> OllamaStatusDict:
@@ -43,6 +74,7 @@ def refresh_ollama_status() -> OllamaStatusDict:
 # Handler registry — DB handlers removed, ML handlers will be added here
 HANDLERS = {
     "ping": ping,
+    "get_sidecar_info": get_sidecar_info,
     "name_recording": name_recording,
     "get_ollama_status": get_ollama_status,
     "set_ollama_model": set_ollama_model,

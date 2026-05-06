@@ -41,6 +41,56 @@ struct AppState {
     audio: AudioState,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SidecarInfo {
+    package_version: String,
+    python_version: String,
+    python_implementation: String,
+    platform: String,
+    executable: String,
+    is_frozen: bool,
+}
+
+#[derive(serde::Serialize)]
+struct AppVersions {
+    app: &'static str,
+    tauri: &'static str,
+    os: String,
+    /// `None` when the sidecar hasn't been started yet (lazy on first
+    /// ML call). Settings → About surfaces that as "Not started."
+    sidecar: Option<SidecarInfo>,
+}
+
+/// Return consolidated version info for the About panel.
+///
+/// Does NOT start the sidecar — only queries it if it's already
+/// running. Avoids the cost of spawning + warming up just to show a
+/// dialog.
+#[tauri::command]
+fn get_app_versions(state: State<'_, AppState>) -> AppVersions {
+    let sidecar = (|| -> Option<SidecarInfo> {
+        let mut guard = state.sidecar.lock().ok()?;
+        let manager = guard.as_mut()?;
+        let req = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "get_sidecar_info",
+            "id": 1,
+        })
+        .to_string();
+        let resp_str = manager.call_sync(&req).ok()?;
+        let resp: serde_json::Value = serde_json::from_str(&resp_str).ok()?;
+        let result = resp.get("result")?.clone();
+        serde_json::from_value(result).ok()
+    })();
+
+    AppVersions {
+        app: env!("CARGO_PKG_VERSION"),
+        tauri: tauri::VERSION,
+        os: format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
+        sidecar,
+    }
+}
+
 #[tauri::command]
 fn sidecar_call(
     request: String,
@@ -533,6 +583,7 @@ fn main() {
         .manage(RecorderConfigState::new())
         .invoke_handler(tauri::generate_handler![
             sidecar_call,
+            get_app_versions,
             audio_play,
             audio_pause,
             audio_resume,

@@ -7,6 +7,7 @@ import type { SearchStats } from "../api/types";
 import type { OrphanedRecording } from "./OrphanedRecordingsDialog";
 import { getVersion } from "@tauri-apps/api/app";
 import { useUpdaterStore } from "../store/updaterStore";
+import { api, type AppVersions } from "../api/client";
 
 interface SettingsDialogProps {
   onClose: () => void;
@@ -26,6 +27,8 @@ export function SettingsDialog({ onClose, llmStatus, onRefreshLlm, onSetLlmModel
   const [orphanScanning, setOrphanScanning] = useState(false);
   const [orphanScanResult, setOrphanScanResult] = useState<string | null>(null);
   const [appVersion, setAppVersion] = useState<string>("");
+  const [versions, setVersions] = useState<AppVersions | null>(null);
+  const [versionsLoading, setVersionsLoading] = useState(false);
 
   const updaterStatus = useUpdaterStore((s) => s.status);
   const updaterNewVersion = useUpdaterStore((s) => s.newVersion);
@@ -36,6 +39,23 @@ export function SettingsDialog({ onClose, llmStatus, onRefreshLlm, onSetLlmModel
 
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => {});
+    setVersionsLoading(true);
+    api
+      .getAppVersions()
+      .then(setVersions)
+      .catch((err) => console.warn("getAppVersions failed:", err))
+      .finally(() => setVersionsLoading(false));
+  }, []);
+
+  const refreshVersions = useCallback(async () => {
+    setVersionsLoading(true);
+    try {
+      setVersions(await api.getAppVersions());
+    } catch (err) {
+      console.warn("getAppVersions refresh failed:", err);
+    } finally {
+      setVersionsLoading(false);
+    }
   }, []);
 
   // Load watch directories and stats on mount
@@ -319,9 +339,78 @@ export function SettingsDialog({ onClose, llmStatus, onRefreshLlm, onSetLlmModel
               </p>
             </div>
           </section>
+
+          {/* About */}
+          <section>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-medium">About</h3>
+              <button
+                type="button"
+                onClick={() => void refreshVersions()}
+                disabled={versionsLoading}
+                className="text-[10px] px-2 py-0.5 bg-surface hover:bg-surface-hover border border-surface-border rounded transition-colors disabled:opacity-50"
+                title="Re-query sidecar version (useful after first ML call wakes it)"
+              >
+                {versionsLoading ? "…" : "↻"}
+              </button>
+            </div>
+            <div className="space-y-1 text-sm">
+              <VersionRow label="App" value={versions ? `v${versions.app}` : "—"} />
+              <VersionRow label="Tauri" value={versions ? `v${versions.tauri}` : "—"} />
+              <VersionRow label="OS / arch" value={versions?.os ?? "—"} mono />
+              {versions?.sidecar ? (
+                <>
+                  <VersionRow
+                    label="Sidecar"
+                    value={`v${versions.sidecar.package_version}${versions.sidecar.is_frozen ? " (bundled)" : " (dev)"}`}
+                  />
+                  <VersionRow
+                    label="Python"
+                    value={`${versions.sidecar.python_implementation} ${versions.sidecar.python_version}`}
+                  />
+                </>
+              ) : (
+                <VersionRow
+                  label="Sidecar"
+                  value={versionsLoading ? "Loading…" : "Not started"}
+                  hint={
+                    !versionsLoading
+                      ? "Starts on first ML call (auto-naming, captioning)"
+                      : undefined
+                  }
+                />
+              )}
+            </div>
+          </section>
         </div>
       </div>
     </div>
+  );
+}
+
+function VersionRow({
+  label,
+  value,
+  mono,
+  hint,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  hint?: string;
+}) {
+  return (
+    <>
+      <div className="flex justify-between text-gray-400">
+        <span>{label}</span>
+        <span
+          className={`text-gray-300 ${mono ? "font-mono text-xs" : "tabular-nums"}`}
+        >
+          {value}
+        </span>
+      </div>
+      {hint && <p className="text-[10px] text-gray-500 -mt-1">{hint}</p>}
+    </>
   );
 }
 
