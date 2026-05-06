@@ -498,7 +498,22 @@ export const api = {
   async getAppVersions(): Promise<AppVersions> {
     return invoke<AppVersions>("get_app_versions");
   },
+
+  async getAppDataPaths(): Promise<AppDataPaths> {
+    return invoke<AppDataPaths>("get_app_data_paths");
+  },
+
+  async revealPath(path: string): Promise<void> {
+    return invoke("reveal_path", { path });
+  },
 };
+
+export interface AppDataPaths {
+  library_data_dir: string;
+  recordings_dir: string;
+  config_path: string;
+  models_dir: string;
+}
 
 export interface SidecarInfo {
   package_version: string;

@@ -253,6 +253,45 @@ fn recorder_get_recordings_dir() -> Result<String, String> {
     Ok(dir.to_string_lossy().to_string())
 }
 
+#[derive(serde::Serialize)]
+struct AppDataPaths {
+    library_data_dir: String,
+    recordings_dir: String,
+    config_path: String,
+    models_dir: String,
+}
+
+#[tauri::command]
+fn get_app_data_paths() -> AppDataPaths {
+    let home = dirs::home_dir().unwrap_or_default();
+    let base = home.join(".music-hub-data");
+    AppDataPaths {
+        library_data_dir: base.to_string_lossy().to_string(),
+        recordings_dir: base.join("recordings").to_string_lossy().to_string(),
+        config_path: base.join("config.toml").to_string_lossy().to_string(),
+        models_dir: base.join("models").to_string_lossy().to_string(),
+    }
+}
+
+#[tauri::command]
+fn reveal_path(path: String) -> Result<(), String> {
+    let p = std::path::PathBuf::from(&path);
+    if !p.exists() {
+        if let Some(parent) = p.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        if path.ends_with('/') || p.extension().is_none() {
+            std::fs::create_dir_all(&p).map_err(|e| e.to_string())?;
+        }
+    }
+    let target = if p.is_file() { p.parent().map(|x| x.to_path_buf()).unwrap_or(p.clone()) } else { p.clone() };
+    std::process::Command::new("open")
+        .arg(&target)
+        .spawn()
+        .map_err(|e| format!("Failed to reveal path: {}", e))?;
+    Ok(())
+}
+
 #[tauri::command]
 fn recorder_open_recordings_dir(config_state: State<'_, RecorderConfigState>) -> Result<(), String> {
     let config = config_state.get()?;
@@ -676,6 +715,8 @@ fn main() {
             recorder_get_recording_waveform,
             recorder_get_recordings_dir,
             recorder_open_recordings_dir,
+            get_app_data_paths,
+            reveal_path,
             recorder_get_config,
             recorder_set_config,
             recorder_set_armed,
