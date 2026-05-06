@@ -160,14 +160,18 @@ def _refine_with_hf(transcript: str, model_id: str) -> str | None:
         prompt = LLM_PROMPT_TEMPLATE.format(transcript=transcript.strip())
         # Prefer the chat template when the model defines one; otherwise fall
         # back to raw prompt encoding. Qwen / Phi-3 / Gemma all ship templates.
+        # In transformers 5.x both paths return a ``BatchEncoding`` (dict-like
+        # with ``input_ids``); older versions of ``apply_chat_template`` returned
+        # a bare tensor. We tolerate both via ``getattr``.
         if getattr(tok, "chat_template", None):
-            input_ids = tok.apply_chat_template(
+            encoded = tok.apply_chat_template(
                 [{"role": "user", "content": prompt}],
                 return_tensors="pt",
                 add_generation_prompt=True,
             )
         else:
-            input_ids = tok(prompt, return_tensors="pt").input_ids
+            encoded = tok(prompt, return_tensors="pt")
+        input_ids = getattr(encoded, "input_ids", encoded)
 
         with torch.no_grad():
             output = model.generate(
@@ -214,10 +218,13 @@ def instantiate_hf_llm(model_id: str) -> dict[str, Any]:
         raise RuntimeError(f"No config.json found in {ckpt_dir}")
 
     tok = AutoTokenizer.from_pretrained(str(ckpt_dir))
+    # ``dtype`` (transformers 5.x) replaces the deprecated ``torch_dtype``.
+    # No ``device_map`` — CPU is the default, and ``device_map="cpu"`` would
+    # require ``accelerate`` (which isn't always installed even with the
+    # ``[llm-hf]`` extra applied to the running venv).
     model = AutoModelForCausalLM.from_pretrained(
         str(ckpt_dir),
-        torch_dtype=torch.float32,
-        device_map="cpu",
+        dtype=torch.float32,
     )
     model.eval()
     return {"tokenizer": tok, "model": model}

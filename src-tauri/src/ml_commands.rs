@@ -725,33 +725,41 @@ pub fn ml_get_status(
     let config = cfg.snapshot()?;
     let snapshot = fetch_full_status(&config, &app_state);
 
-    // First call after app start: kick off background loads for any enabled
-    // feature whose model is downloaded but not yet loaded. Subsequent calls
-    // are pure reads. Foundation/ollama backends manage their own warmup,
-    // so we only auto-load HF.
-    if !cfg.autoload_done.swap(true, Ordering::SeqCst) {
-        let mut already_kicked: std::collections::HashSet<String> = Default::default();
-        for feat in &snapshot.features {
-            if !feat.enabled {
-                continue;
-            }
-            if feat.backend != BACKEND_HF {
-                continue;
-            }
-            if !already_kicked.insert(feat.model_id.clone()) {
-                continue;
-            }
-            if let Some(m) = snapshot.models.iter().find(|m| m.info.model_id == feat.model_id) {
-                if m.state == "downloaded_not_loaded" {
-                    let _ = rpc(
-                        &app_state,
-                        "ml_load_model",
-                        serde_json::json!({ "model_id": feat.model_id.clone() }),
-                    );
-                }
+    // Auto-load any enabled HF feature whose model is downloaded but not
+    // yet loaded. Foundation / ollama backends manage their own warmup,
+    // so this only fires for HF. Idempotent on the sidecar side
+    // (``models.load_model`` returns the current state when already
+    // loading or loaded), so it's safe to fire on every status call —
+    // catches the post-toggle download-completed case in addition to
+    // app-startup. The autoload_done flag is retained so first-startup
+    // still reliably re-fetches once.
+    let mut kicked = false;
+    let mut already_kicked: std::collections::HashSet<String> = Default::default();
+    for feat in &snapshot.features {
+        if !feat.enabled {
+            continue;
+        }
+        if feat.backend != BACKEND_HF {
+            continue;
+        }
+        if !already_kicked.insert(feat.model_id.clone()) {
+            continue;
+        }
+        if let Some(m) = snapshot.models.iter().find(|m| m.info.model_id == feat.model_id) {
+            if m.state == "downloaded_not_loaded" {
+                let _ = rpc(
+                    &app_state,
+                    "ml_load_model",
+                    serde_json::json!({ "model_id": feat.model_id.clone() }),
+                );
+                kicked = true;
             }
         }
-        // Re-fetch so the response reflects any loads we just kicked off.
+    }
+    cfg.autoload_done.store(true, Ordering::SeqCst);
+
+    if kicked {
+        // Re-fetch so the response reflects the "loading" we just kicked off.
         return Ok(fetch_full_status(&config, &app_state));
     }
 
