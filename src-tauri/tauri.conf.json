@@ -52,7 +52,8 @@
       "exceptionDomain": "",
       "frameworks": [],
       "providerShortName": null,
-      "signingIdentity": null
+      "signingIdentity": null,
+      "minimumSystemVersion": "15.0"
     },
     "resources": {
       "../sidecar/dist/sample-curation-api/": "sidecar/"

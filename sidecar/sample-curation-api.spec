@@ -56,6 +56,8 @@ hiddenimports += [
     "sample_curation_api.handlers",
     "sample_curation_api.naming",
     "sample_curation_api.ollama_status",
+    "sample_curation_api.llm",
+    "sample_curation_api.models",
 ]
 
 # ============ Data files ============
@@ -73,6 +75,13 @@ try:
     datas += copy_metadata("sample-curation-api")
 except Exception:
     pass
+
+# vault-3ume: the LLM prompt template is read at module load via
+# ``Path(__file__).parent / "llm_prompt.txt"``. PyInstaller doesn't pick
+# up sibling data files automatically — bundle it explicitly so the frozen
+# sidecar can find it. Same source-of-truth file is read by Rust at
+# compile time via ``include_str!``.
+datas += [("sample_curation_api/llm_prompt.txt", "sample_curation_api")]
 
 # ============ Build ============
 a = Analysis(

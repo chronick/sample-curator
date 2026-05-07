@@ -1,0 +1,11 @@
+You are naming a short vocal audio sample for a music producer's sample library.
+
+Transcript: "{transcript}"
+
+Produce a memorable 2-4 word filename stem. Rules:
+- Lowercase only, words joined by hyphens (e.g. 'eternal-wave-chant')
+- Use evocative content words (nouns, strong verbs); skip filler
+- Max 40 characters total
+- Return ONLY the stem — no quotes, no explanation, no trailing punctuation
+
+Stem:

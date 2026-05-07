@@ -24,19 +24,35 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-# Same template as the legacy ollama path — works fine for small instruct
-# models (Qwen 2.5 0.5B, Phi-3-mini).
-LLM_PROMPT_TEMPLATE = """You are naming a short vocal audio sample for a music producer's sample library.
+# Pre-import the HF LLM symbols at module-load time so the lazy module
+# loader runs in the main thread. ``models._do_load`` spawns a daemon
+# thread that calls ``instantiate_hf_llm`` — without this preload,
+# transformers 5.x's ``_LazyModule.__getattr__`` can race in the
+# background thread and surface as
+# ``ImportError: cannot import name 'AutoModelForCausalLM' from
+# 'transformers'`` even though the symbols exist in the venv.
+#
+# Wrapped in try/except so the sidecar still boots when ``[llm-hf]`` is
+# not installed (the user only wants ollama / foundation backends).
+_HF_PRELOADED: bool = False
+try:
+    from transformers import AutoModelForCausalLM as _PRELOAD_AUTO_LM  # noqa: F401
+    from transformers import AutoTokenizer as _PRELOAD_AUTO_TOK  # noqa: F401
+    import torch as _PRELOAD_TORCH  # noqa: F401
 
-Transcript: "{transcript}"
+    _HF_PRELOADED = True
+except Exception as _hf_preload_err:  # noqa: BLE001 — broad catch is intentional
+    log.info(
+        "HF LLM backend unavailable (preload failed: %s) — install with `uv sync --extra llm-hf`",
+        _hf_preload_err,
+    )
 
-Produce a memorable 2-4 word filename stem. Rules:
-- Lowercase only, words joined by hyphens (e.g. 'eternal-wave-chant')
-- Use evocative content words (nouns, strong verbs); skip filler
-- Max 40 characters total
-- Return ONLY the stem — no quotes, no explanation, no trailing punctuation
-
-Stem:"""
+# Single source of truth for the LLM prompt template, shared with Rust's
+# Foundation Models bridge (which reads the same file via ``include_str!``).
+# Same template across all three backends (ollama / hf / foundation) so they
+# produce comparable outputs — works fine for small instruct models
+# (Qwen 2.5 0.5B, Phi-3-mini, Apple Foundation Models).
+LLM_PROMPT_TEMPLATE = (Path(__file__).parent / "llm_prompt.txt").read_text(encoding="utf-8")
 
 ML_CONFIG_PATH = Path.home() / ".music-hub-data" / "ml-features-config.json"
 
@@ -47,30 +63,35 @@ def get_active_backend() -> str | None:
     Used by ``naming.py`` to decide whether to surface
     ``transcript_for_external_refine`` (foundation backend = Rust handles
     refinement post-hoc via the Swift bridge)."""
-    backend, _model_id, enabled = _load_active_llm_config()
+    backend, _model_id, enabled, _exists = _load_active_llm_config()
     if not enabled:
         return None
     return backend
 
 
-def _load_active_llm_config() -> tuple[str | None, str | None, bool]:
+def _load_active_llm_config() -> tuple[str | None, str | None, bool, bool]:
     """Read the active LLM feature config from disk.
 
-    Returns ``(backend, model_id, enabled)``. Any read/parse error returns
-    ``(None, None, False)``.
+    Returns ``(backend, model_id, enabled, config_exists)``. ``config_exists``
+    distinguishes "no config file at all" (legacy install) from "config
+    file says feature is off" — only the latter should suppress legacy
+    ollama auto-detect.
     """
     try:
         with ML_CONFIG_PATH.open("r", encoding="utf-8") as f:
             data = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return None, None, False
+    except FileNotFoundError:
+        return None, None, False, False
+    except json.JSONDecodeError:
+        return None, None, False, True
     feat = data.get("features", {}).get("llm_naming_refinement")
     if not isinstance(feat, dict):
-        return None, None, False
+        return None, None, False, True
     return (
         feat.get("backend") or None,
         feat.get("model_id") or None,
         bool(feat.get("enabled", False)),
+        True,
     )
 
 
@@ -143,11 +164,9 @@ def _refine_with_hf(transcript: str, model_id: str) -> str | None:
     if loaded is None:
         log.info("HF LLM %s not loaded; refinement skipped", model_id)
         return None
-
-    try:
-        import torch  # type: ignore
-    except ImportError:
+    if not _HF_PRELOADED:
         return None
+    torch = _PRELOAD_TORCH
 
     try:
         tok = loaded["tokenizer"]
@@ -198,17 +217,17 @@ def instantiate_hf_llm(model_id: str) -> dict[str, Any]:
     Returns ``{"tokenizer": ..., "model": ...}``. Called by
     ``models._instantiate_model`` when ``model_id in HF_LLM_MODELS``.
 
-    Raises ``RuntimeError`` if dependencies are missing or the snapshot is
-    incomplete — caller (``models._do_load``) records the error in
-    ``_DOWNLOADS`` so the UI surfaces it.
+    Symbols are pre-imported at module load (see top of file) so this
+    can run in a daemon thread without tripping transformers 5.x lazy
+    loader races. Raises ``RuntimeError`` if preload failed (extras not
+    installed) or the snapshot is incomplete — caller
+    (``models._do_load``) records the error in ``_DOWNLOADS`` so the
+    UI surfaces it.
     """
-    try:
-        from transformers import AutoModelForCausalLM, AutoTokenizer
-        import torch
-    except ImportError as e:
+    if not _HF_PRELOADED:
         raise RuntimeError(
-            f"transformers/torch not installed; run `uv sync --extra llm-hf`. ({e})"
-        ) from e
+            "transformers/torch not installed; run `uv sync --extra llm-hf`."
+        )
 
     # Local circular avoidance.
     from sample_curation_api.models import _model_path
@@ -217,14 +236,14 @@ def instantiate_hf_llm(model_id: str) -> dict[str, Any]:
     if not (ckpt_dir / "config.json").is_file():
         raise RuntimeError(f"No config.json found in {ckpt_dir}")
 
-    tok = AutoTokenizer.from_pretrained(str(ckpt_dir))
+    tok = _PRELOAD_AUTO_TOK.from_pretrained(str(ckpt_dir))
     # ``dtype`` (transformers 5.x) replaces the deprecated ``torch_dtype``.
     # No ``device_map`` — CPU is the default, and ``device_map="cpu"`` would
     # require ``accelerate`` (which isn't always installed even with the
     # ``[llm-hf]`` extra applied to the running venv).
-    model = AutoModelForCausalLM.from_pretrained(
+    model = _PRELOAD_AUTO_LM.from_pretrained(
         str(ckpt_dir),
-        dtype=torch.float32,
+        dtype=_PRELOAD_TORCH.float32,
     )
     model.eval()
     return {"tokenizer": tok, "model": model}
@@ -238,19 +257,29 @@ def instantiate_hf_llm(model_id: str) -> dict[str, Any]:
 def refine_transcript(transcript: str) -> str | None:
     """Dispatch to the active backend. Returns ``None`` when:
 
-    - LLM feature is disabled
+    - LLM feature is explicitly disabled in the config
     - Active backend is ``foundation`` (handled by Rust post-hoc)
     - Backend-specific refinement fails (model not loaded, daemon down, etc.)
+
+    Back-compat: when no config file exists at all (legacy install),
+    fall back to the OllamaStatus auto-detect path so existing setups
+    keep working without touching Settings.
     """
     if not transcript or not transcript.strip():
         return None
 
-    backend, model_id, enabled = _load_active_llm_config()
+    backend, model_id, enabled, config_exists = _load_active_llm_config()
+
+    if not config_exists:
+        # Legacy install — no Settings dialog has ever written the config
+        # file. Use the pre-Slice-1 ollama auto-detect path.
+        return _refine_with_ollama_legacy(transcript)
+
     if not enabled:
         return None
     if not backend:
-        # Pre-Slice-1 config or malformed — fall back to legacy ollama
-        # auto-detect for back-compat with existing installs.
+        # Config exists but backend wasn't migrated — fall back to legacy
+        # ollama auto-detect for safety.
         return _refine_with_ollama_legacy(transcript)
 
     if backend == "ollama":

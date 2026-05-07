@@ -642,21 +642,16 @@ fn auto_name_recording(
     }
 }
 
-/// Mirror of the prompt template used by the ollama / hf backends in the
-/// sidecar. Kept in sync manually — small enough that drift is easy to
-/// catch in review.
+/// LLM prompt template shared with the sidecar's ollama / hf backends.
+/// Single source of truth — the file is read at compile time on the Rust
+/// side (``include_str!``) and at module load on the Python side
+/// (``llm_prompt.txt`` next to ``llm.py``). Drift is impossible.
+const FM_PROMPT_TEMPLATE: &str = include_str!(
+    "../../sidecar/sample_curation_api/llm_prompt.txt"
+);
+
 fn format_fm_prompt(transcript: &str) -> String {
-    format!(
-        "You are naming a short vocal audio sample for a music producer's sample library.\n\n\
-         Transcript: \"{}\"\n\n\
-         Produce a memorable 2-4 word filename stem. Rules:\n\
-         - Lowercase only, words joined by hyphens (e.g. 'eternal-wave-chant')\n\
-         - Use evocative content words (nouns, strong verbs); skip filler\n\
-         - Max 40 characters total\n\
-         - Return ONLY the stem — no quotes, no explanation, no trailing punctuation\n\n\
-         Stem:",
-        transcript.trim()
-    )
+    FM_PROMPT_TEMPLATE.replace("{transcript}", transcript.trim())
 }
 
 fn main() {
