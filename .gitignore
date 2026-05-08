@@ -34,3 +34,7 @@ e2e/screenshots/
 __pycache__/
 *.pyc
 *.pyo
+
+# Bundled uv binary (vault-347l) — fetched by scripts/fetch-uv.sh,
+# tracked in CI / release pipeline rather than in git (~28 MB).
+src-tauri/resources/uv

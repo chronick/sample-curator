@@ -40,6 +40,9 @@ jobs:
       - name: Bundle Python sidecar (PyInstaller, vault-3bd8)
         run: npm run sidecar:bundle
 
+      - name: Fetch bundled uv binary (vault-347l)
+        run: npm run resources:fetch
+
       - name: Build + release
         uses: tauri-apps/tauri-action@v0
         env:

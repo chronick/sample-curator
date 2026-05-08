@@ -56,7 +56,9 @@
       "minimumSystemVersion": "15.0"
     },
     "resources": {
-      "../sidecar/dist/sample-curation-api/": "sidecar/"
+      "../sidecar/dist/sample-curation-api/": "sidecar/",
+      "resources/uv": "uv",
+      "resources/runtime-pyproject.toml": "runtime-pyproject.toml"
     },
     "shortDescription": "",
     "targets": "all",

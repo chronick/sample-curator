@@ -1,0 +1,55 @@
+# Runtime pyproject for the uv-managed venv (vault-347l Phase 2).
+#
+# This file is bundled inside the .app at
+# `Contents/Resources/runtime-pyproject.toml`.
+# `deps_install` copies it into `~/.music-hub-data/python/runtime/` and
+# runs `uv sync --extra X --extra Y` against it. The extras here mirror
+# `sidecar/pyproject.toml` for the heavy ML libs only — sidecar's own
+# core deps (numpy, librosa, sqlalchemy, etc.) ship inside the frozen
+# sample-curation-api binary and are NOT replicated here.
+
+[project]
+name = "sample-curator-runtime"
+version = "0.1.0"
+description = "Heavy ML extras for Sample Curator (vault-347l Phase 2)"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+embedding = [
+    "transformers>=4.40",
+    "torch>=2.0.0",
+    "laion-clap>=1.1.0",
+    "torchvision>=0.15.0",
+]
+
+transcription = [
+    "faster-whisper>=1.0.0",
+]
+
+stems = [
+    "demucs>=4.0.0",
+    "torch>=2.0.0",
+]
+
+# accelerate intentionally absent — the worker calls
+# AutoModelForCausalLM.from_pretrained() without device_map, so the
+# model lands on plain CPU torch. See sidecar/sample_curation_api/llm.py.
+llm-hf = [
+    "transformers>=4.40",
+    "torch>=2.0.0",
+]
+
+llm-ollama = [
+    "ollama>=0.3.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+# uv requires a build target; we'll never actually build a wheel from
+# this project (it's a venv-spec only) but uv resolves the wheel target
+# during `uv sync`. Empty package list is fine.
+packages = []
