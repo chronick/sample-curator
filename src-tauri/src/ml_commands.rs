@@ -489,7 +489,7 @@ impl MlConfigState {
 
 // ============ Sidecar proxy ============
 
-fn rpc(state: &State<'_, AppState>, method: &str, params: serde_json::Value) -> Result<serde_json::Value, String> {
+pub(crate) fn rpc(state: &State<'_, AppState>, method: &str, params: serde_json::Value) -> Result<serde_json::Value, String> {
     let mut guard = state.sidecar.lock().map_err(|e| e.to_string())?;
     if guard.is_none() {
         match crate::sidecar::SidecarManager::new() {

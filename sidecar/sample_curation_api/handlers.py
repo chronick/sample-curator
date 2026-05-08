@@ -8,6 +8,7 @@ import platform
 import sys
 
 from sample_curation_api.deps import deps_status
+from sample_curation_api.stems import separate_stems
 from sample_curation_api.models import (
     cancel_download as ml_cancel_download,
     download_model as ml_download_model,
@@ -97,6 +98,9 @@ HANDLERS = {
     "ml_unload_model": ml_unload_model,
     # Runtime ML deps detection (vault-347l).
     "deps_status": deps_status,
+    # Stem separation (vault-2nnt). Rust commands.rs proxies this; the
+    # sidecar delegates to ml_worker.separate_demucs over the WorkerManager.
+    "separate_stems": separate_stems,
     # Future: "caption_sample": caption_sample,
     # Future: "semantic_search": semantic_search,
 }

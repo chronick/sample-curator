@@ -20,6 +20,12 @@ pub enum JobType {
     Spectral,
     /// Full analysis pipeline.
     Full,
+    /// Run demucs stem separation (vault-2nnt). Currently driven by
+    /// the `stems::separate_stems` Tauri command rather than the
+    /// in-process JobWorker, but the variant exists so the analysis
+    /// job table can persist queued/running stem work and the future
+    /// unified TransformJob queue (vault-1mlx) has a slot for it.
+    StemSeparation,
 }
 
 impl JobType {
@@ -29,6 +35,7 @@ impl JobType {
             JobType::Clap => "clap",
             JobType::Spectral => "spectral",
             JobType::Full => "full",
+            JobType::StemSeparation => "stem_separation",
         }
     }
 
@@ -38,6 +45,7 @@ impl JobType {
             "clap" => Some(JobType::Clap),
             "spectral" => Some(JobType::Spectral),
             "full" => Some(JobType::Full),
+            "stem_separation" => Some(JobType::StemSeparation),
             _ => None,
         }
     }
@@ -471,6 +479,13 @@ impl JobWorker {
             JobType::Clap => {
                 // CLAP requires Python sidecar - this is handled externally
                 log::info!("CLAP job requires Python sidecar");
+            }
+            JobType::StemSeparation => {
+                // Stem separation is driven by the `stems::separate_stems`
+                // Tauri command (which talks to the sidecar's runtime
+                // worker). The in-process JobWorker doesn't run it; rows
+                // of this kind are owned by the command-driven path.
+                log::debug!("StemSeparation job seen by JobWorker; skipping");
             }
             JobType::Full => {
                 // Run spectral + embedding

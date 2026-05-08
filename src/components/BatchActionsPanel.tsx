@@ -4,6 +4,7 @@
  */
 
 import { useEffect, useState, useCallback } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { api } from "../api/client";
 import { useStore } from "../store";
@@ -12,6 +13,13 @@ import { SplitDialog } from "./SplitDialog";
 interface BatchActionsPanelProps {
   selectedIds: Set<number>;
   onUpdate: () => void;
+}
+
+interface StemsProgressPayload {
+  sample_id: number;
+  status: "started" | "skipped" | "completed" | "failed";
+  error: string | null;
+  stems: Array<{ role: string; path: string; sample_id: number }> | null;
 }
 
 interface SplitProgressPayload {
@@ -45,6 +53,18 @@ export function BatchActionsPanel({ selectedIds, onUpdate }: BatchActionsPanelPr
     jobId: string;
     progress: SplitProgressPayload | null;
     complete: SplitCompletePayload | null;
+  } | null>(null);
+  // Tracks the stem-separation batch the panel last kicked off, so we
+  // can render a per-clip status line (done / skipped / failed) until
+  // `stems_progress_complete` arrives. demucs is slow (seconds-to-
+  // minutes per clip), so this is the only feedback the user gets.
+  const [stemsJob, setStemsJob] = useState<{
+    total: number;
+    completed: number;
+    skipped: number;
+    failed: number;
+    lastError: string | null;
+    done: boolean;
   } | null>(null);
 
   const count = selectedIds.size;
@@ -130,6 +150,79 @@ export function BatchActionsPanel({ selectedIds, onUpdate }: BatchActionsPanelPr
     };
   }, [splitJob?.jobId, onUpdate]);
 
+  // Subscribe to stems_progress events while a stem batch is running.
+  // Counts completed / skipped / failed clips and surfaces the last
+  // error message (if any). Refreshes the library on completion so
+  // the new stem samples show up.
+  useEffect(() => {
+    if (!stemsJob || stemsJob.done) return;
+    const unlisteners: UnlistenFn[] = [];
+    let cancelled = false;
+    (async () => {
+      const offProgress = await listen<StemsProgressPayload>(
+        "stems_progress",
+        (e) => {
+          if (cancelled) return;
+          const p = e.payload;
+          if (p.status === "started") return;
+          setStemsJob((prev) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              completed:
+                prev.completed + (p.status === "completed" ? 1 : 0),
+              skipped: prev.skipped + (p.status === "skipped" ? 1 : 0),
+              failed: prev.failed + (p.status === "failed" ? 1 : 0),
+              lastError: p.status === "failed" ? p.error : prev.lastError,
+            };
+          });
+        }
+      );
+      const offComplete = await listen("stems_progress_complete", () => {
+        if (cancelled) return;
+        setStemsJob((prev) => (prev ? { ...prev, done: true } : prev));
+        onUpdate();
+        window.setTimeout(() => {
+          if (!cancelled) setStemsJob(null);
+        }, 8000);
+      });
+      if (cancelled) {
+        offProgress();
+        offComplete();
+      } else {
+        unlisteners.push(offProgress, offComplete);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      for (const off of unlisteners) off();
+    };
+  }, [stemsJob?.done, onUpdate]);
+
+  const handleSeparateStems = useCallback(async () => {
+    if (ids.length === 0) return;
+    setStemsJob({
+      total: ids.length,
+      completed: 0,
+      skipped: 0,
+      failed: 0,
+      lastError: null,
+      done: false,
+    });
+    try {
+      await invoke("separate_stems", { sampleIds: ids });
+    } catch (err) {
+      setStemsJob({
+        total: ids.length,
+        completed: 0,
+        skipped: 0,
+        failed: ids.length,
+        lastError: String(err),
+        done: true,
+      });
+    }
+  }, [ids]);
+
   const handleBatchAddTag = useCallback(async () => {
     const tag = newTag.trim().toLowerCase();
     if (!tag) return;
@@ -176,6 +269,42 @@ export function BatchActionsPanel({ selectedIds, onUpdate }: BatchActionsPanelPr
               : splitJob.progress
                 ? `Splitting ${splitJob.progress.sample_index + 1}/${splitJob.progress.total_samples} · ${splitJob.progress.chunks_so_far} chunks so far`
                 : "Starting split…"}
+          </div>
+        )}
+      </div>
+
+      {/* Stem separation */}
+      <div className="space-y-2">
+        <div className="text-xs text-gray-400">Stems</div>
+        <button
+          onClick={handleSeparateStems}
+          disabled={count === 0 || (stemsJob !== null && !stemsJob.done)}
+          className="w-full px-3 py-2 rounded text-xs font-medium bg-accent/20 text-accent hover:bg-accent/30 transition-colors disabled:opacity-50"
+          data-testid="batch-actions-separate-stems"
+        >
+          Separate stems
+        </button>
+        {stemsJob && (
+          <div
+            className="text-[10px] text-gray-400 bg-surface-raised/40 rounded px-2 py-1.5 space-y-0.5"
+            data-testid="batch-actions-stems-progress"
+          >
+            {stemsJob.done ? (
+              <>
+                <div>
+                  Stems done: {stemsJob.completed} separated
+                  {stemsJob.skipped > 0 ? `, ${stemsJob.skipped} skipped` : ""}
+                  {stemsJob.failed > 0 ? `, ${stemsJob.failed} failed` : ""}
+                </div>
+                {stemsJob.lastError && (
+                  <div className="text-red-400">{stemsJob.lastError}</div>
+                )}
+              </>
+            ) : (
+              <div>
+                Separating: {stemsJob.completed + stemsJob.skipped + stemsJob.failed}/{stemsJob.total}
+              </div>
+            )}
           </div>
         )}
       </div>

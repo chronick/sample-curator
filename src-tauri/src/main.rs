@@ -22,6 +22,7 @@ mod recorder;
 mod search;
 mod sidecar;
 mod split;
+mod stems;
 mod transforms;
 mod watch;
 
@@ -810,6 +811,8 @@ fn main() {
             // Apple Foundation Models bridge (vault-3ume)
             foundation_models::llm_foundation_refine,
             foundation_models::llm_foundation_availability,
+            // Stem separation (vault-2nnt)
+            stems::separate_stems,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
