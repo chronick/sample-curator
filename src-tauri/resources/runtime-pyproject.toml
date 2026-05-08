@@ -30,6 +30,10 @@ transcription = [
 stems = [
     "demucs>=4.0.0",
     "torch>=2.0.0",
+    "torchaudio>=2.0.0",
+    # torchaudio>=2.11 dropped builtin save/load backends; ml_worker
+    # uses torchaudio.load/save in separate_demucs.
+    "torchcodec>=0.11.0",
 ]
 
 # accelerate intentionally absent — the worker calls
@@ -44,12 +48,11 @@ llm-ollama = [
     "ollama>=0.3.0",
 ]
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-[tool.hatch.build.targets.wheel]
-# uv requires a build target; we'll never actually build a wheel from
-# this project (it's a venv-spec only) but uv resolves the wheel target
-# during `uv sync`. Empty package list is fine.
-packages = []
+# Tell uv this is a virtual project — no wheel ever built for the
+# runtime project itself. Without this, `uv sync` invokes hatchling and
+# fails with "Unable to determine which files to ship" because there's
+# no source tree to package. Discovered while wiring vault-2nnt: any
+# extra (stems / embedding / transcription / llm-hf) hits the same
+# build-step before uv ever resolves transitive deps.
+[tool.uv]
+package = false

@@ -263,6 +263,7 @@ def separate_demucs(model_id: str, audio_path: str, output_dir: str) -> dict:
     """Stem separation via demucs. Returns dict with paths to separated stems."""
     try:
         from demucs.pretrained import get_model
+        from demucs.apply import apply_model
     except ImportError as e:
         return {
             "stems": None,
@@ -270,15 +271,17 @@ def separate_demucs(model_id: str, audio_path: str, output_dir: str) -> dict:
         }
 
     try:
+        import torch
+        import torchaudio
         from pathlib import Path
         short = model_id.rsplit("/", 1)[-1]  # "facebook/htdemucs" -> "htdemucs"
 
-        # Load model (lazy, reuse _LOADED cache)
         cache_key = f"demucs:{model_id}"
         with _LOADED_LOCK:
             cached = _LOADED.get(cache_key)
             if cached is None:
-                model = get_model(short)  # demucs handles download to ~/.cache/torch/hub/
+                model = get_model(short)  # downloads to ~/.cache/torch/hub/
+                model.eval()
                 cached = {"model": model}
                 _LOADED[cache_key] = cached
                 _LOADED["kind"] = "demucs"
@@ -286,31 +289,26 @@ def separate_demucs(model_id: str, audio_path: str, output_dir: str) -> dict:
                 _LOADED["loaded"] = True
             model = cached["model"]
 
-        # Separate stems
-        import torch
-        audio, sr = __import__("torchaudio").load(audio_path)
-
-        # Demucs expects stereo or mono at 44.1kHz; resample if needed
-        if sr != 44100:
-            resampler = __import__("torchaudio").transforms.Resample(sr, 44100)
-            audio = resampler(audio)
-
-        # Ensure stereo
+        target_sr = getattr(model, "samplerate", 44100)
+        audio, sr = torchaudio.load(audio_path)
+        if sr != target_sr:
+            audio = torchaudio.transforms.Resample(sr, target_sr)(audio)
         if audio.shape[0] == 1:
             audio = audio.repeat(2, 1)
 
+        # apply_model expects shape (batch, channels, time); returns (batch, sources, channels, time)
+        device = "mps" if torch.backends.mps.is_available() else "cpu"
         with torch.no_grad():
-            sources = model.separate(audio[None, ...])  # batch dim
+            sources = apply_model(model, audio[None, ...], device=device, progress=False)
 
-        # Save stems
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
 
         stems = {}
         for stem_idx, stem_name in enumerate(model.sources):
-            stem_audio = sources[0, stem_idx]
+            stem_audio = sources[0, stem_idx].cpu()
             stem_file = output_path / f"{stem_name}.wav"
-            __import__("torchaudio").save(str(stem_file), stem_audio, 44100)
+            torchaudio.save(str(stem_file), stem_audio, target_sr)
             stems[stem_name] = str(stem_file)
 
         return {"stems": stems}

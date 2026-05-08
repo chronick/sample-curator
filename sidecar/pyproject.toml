@@ -69,10 +69,15 @@ embedding = [
     "torchvision>=0.15.0",
 ]
 
-# Stem separation
+# Stem separation. torchcodec is required by torchaudio>=2.11 for
+# load/save (the legacy soundfile/sox backends were removed). Pinning
+# avoids a runtime ImportError when ml_worker.separate_demucs reads or
+# writes wav files.
 stems = [
     "demucs>=4.0.0",
     "torch>=2.0.0",
+    "torchaudio>=2.0.0",
+    "torchcodec>=0.11.0",
 ]
 
 # Auto-mastering
