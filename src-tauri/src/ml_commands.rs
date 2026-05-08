@@ -84,6 +84,13 @@ pub struct FeatureInfo {
     pub backends: Vec<String>,
     pub default_backend: String,
     pub default_model_id: String,
+    /// Sidecar extras that must be installed for the feature itself to
+    /// function regardless of backend (vault-347l). Per-backend extras
+    /// are declared on ``BackendInfo``; the UI greys the toggle when any
+    /// of (feature.required_extras ∪ active_backend.required_extras)
+    /// reports ``installed: false``.
+    #[serde(default)]
+    pub required_extras: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -92,6 +99,10 @@ pub struct BackendInfo {
     pub label: String,
     /// User-facing one-liner, e.g. "Local daemon · fast quantized inference".
     pub description: String,
+    /// Sidecar extras the backend depends on (vault-347l). Empty for
+    /// the Foundation Models backend (Swift, no Python deps).
+    #[serde(default)]
+    pub required_extras: Vec<String>,
 }
 
 fn registered_backends() -> Vec<BackendInfo> {
@@ -100,16 +111,19 @@ fn registered_backends() -> Vec<BackendInfo> {
             backend_id: BACKEND_FOUNDATION.to_string(),
             label: "Apple Foundation Models".to_string(),
             description: "Built into macOS — zero install, zero download.".to_string(),
+            required_extras: vec![],
         },
         BackendInfo {
             backend_id: BACKEND_OLLAMA.to_string(),
             label: "Ollama".to_string(),
             description: "Local daemon — fast quantized inference. Requires `brew install ollama`.".to_string(),
+            required_extras: vec!["llm_ollama".to_string()],
         },
         BackendInfo {
             backend_id: BACKEND_HF.to_string(),
             label: "HuggingFace Transformers".to_string(),
             description: "In-app inference — bigger first download, runs everywhere.".to_string(),
+            required_extras: vec!["llm_hf".to_string()],
         },
     ]
 }
@@ -189,6 +203,7 @@ fn registered_features() -> Vec<FeatureInfo> {
             backends: vec![BACKEND_HF.to_string()],
             default_backend: BACKEND_HF.to_string(),
             default_model_id: "laion/clap-htsat-unfused".to_string(),
+            required_extras: vec!["embedding".to_string()],
         },
         FeatureInfo {
             feature_id: "auto_naming".to_string(),
@@ -198,6 +213,7 @@ fn registered_features() -> Vec<FeatureInfo> {
             backends: vec![BACKEND_HF.to_string()],
             default_backend: BACKEND_HF.to_string(),
             default_model_id: "openai/whisper-tiny".to_string(),
+            required_extras: vec!["transcription".to_string()],
         },
         FeatureInfo {
             feature_id: "stem_separation".to_string(),
@@ -207,6 +223,7 @@ fn registered_features() -> Vec<FeatureInfo> {
             backends: vec![BACKEND_HF.to_string()],
             default_backend: BACKEND_HF.to_string(),
             default_model_id: "facebook/htdemucs".to_string(),
+            required_extras: vec!["stems".to_string()],
         },
         FeatureInfo {
             feature_id: "llm_naming_refinement".to_string(),
@@ -223,6 +240,9 @@ fn registered_features() -> Vec<FeatureInfo> {
             // persisted ollama model on ollama.
             default_backend: BACKEND_OLLAMA.to_string(),
             default_model_id: "gemma3:1b".to_string(),
+            // Feature-level: empty. Per-backend extras carry the actual
+            // requirements (foundation: none, ollama: llm_ollama, hf: llm_hf).
+            required_extras: vec![],
         },
     ]
 }
@@ -1151,4 +1171,28 @@ pub fn ml_reload_model(
     dispatch_unload(&app_state, &backend, &model_id);
     dispatch_load(&app_state, &backend, &model_id);
     Ok(fetch_full_status(&config, &app_state))
+}
+
+// ============ Runtime ML deps detection (vault-347l) ============
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExtraStatus {
+    pub installed: bool,
+    pub missing: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DepsStatus {
+    pub extras: HashMap<String, ExtraStatus>,
+}
+
+/// Report which sidecar ML extras (transformers/torch/faster-whisper/demucs/
+/// ollama/accelerate) are installed in the running sidecar's interpreter.
+/// Phase 1: read-only — Settings UI uses this to grey feature toggles whose
+/// deps are missing. Phase 2 (separate task) wires actual install via a
+/// uv-managed runtime venv.
+#[tauri::command]
+pub fn deps_get_status(app_state: State<'_, AppState>) -> Result<DepsStatus, String> {
+    let raw = rpc(&app_state, "deps_status", serde_json::json!({}))?;
+    serde_json::from_value(raw).map_err(|e| format!("deps_status decode failed: {e}"))
 }

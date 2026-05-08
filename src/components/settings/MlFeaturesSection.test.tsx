@@ -10,6 +10,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MlFeaturesSection } from "./MlFeaturesSection";
 import {
   useMlFeaturesStore,
+  type DepsStatus,
   type MlBackendView,
   type MlFeatureView,
   type MlModelView,
@@ -34,6 +35,7 @@ function backends(opts: {
       unavailable_reason: opts.foundationAvail
         ? null
         : "Requires macOS 26.0 or later.",
+      required_extras: [],
     },
     {
       backend_id: "ollama",
@@ -41,6 +43,7 @@ function backends(opts: {
       description: "Local daemon",
       available: opts.ollamaAvail ?? true,
       unavailable_reason: opts.ollamaAvail === false ? "Daemon unreachable" : null,
+      required_extras: ["llm_ollama"],
     },
     {
       backend_id: "hf",
@@ -48,6 +51,7 @@ function backends(opts: {
       description: "In-app",
       available: true,
       unavailable_reason: null,
+      required_extras: ["llm_hf"],
     },
   ];
 }
@@ -64,6 +68,7 @@ function llmFeature(overrides: Partial<MlFeatureView> = {}): MlFeatureView {
     enabled: false,
     backend: "hf",
     model_id: "Qwen/Qwen2.5-0.5B-Instruct",
+    required_extras: [],
     ...overrides,
   };
 }
@@ -80,6 +85,7 @@ function clapFeature(overrides: Partial<MlFeatureView> = {}): MlFeatureView {
     enabled: false,
     backend: "hf",
     model_id: "laion/clap-htsat-unfused",
+    required_extras: ["embedding"],
     ...overrides,
   };
 }
@@ -98,6 +104,10 @@ function model(overrides: Partial<MlModelView> = {}): MlModelView {
     disk_bytes: overrides.disk_bytes ?? 0,
     error: overrides.error ?? null,
   };
+}
+
+function setDeps(deps: DepsStatus | null) {
+  useMlFeaturesStore.setState({ deps });
 }
 
 function setStatus(status: MlStatus | null) {
@@ -319,5 +329,161 @@ describe("MlFeaturesSection — backend selector (vault-3ume)", () => {
     ).not.toBeInTheDocument();
     // The "Loaded · ready" badge confirms the row rendered
     expect(screen.getByText(/Loaded · ready/)).toBeInTheDocument();
+  });
+});
+
+describe("MlFeaturesSection — deps gating (vault-347l)", () => {
+  it("renders the Dependencies card with installed/missing per extra", () => {
+    setDeps({
+      extras: {
+        embedding: { installed: false, missing: ["transformers", "torch"] },
+        transcription: { installed: true, missing: [] },
+        stems: { installed: false, missing: ["demucs", "torch"] },
+        llm_hf: { installed: false, missing: ["transformers", "torch", "accelerate"] },
+        llm_ollama: { installed: true, missing: [] },
+      },
+    });
+    setStatus({
+      features: [clapFeature()],
+      models: [],
+      backends: backends(),
+    });
+
+    render(<MlFeaturesSection />);
+
+    const card = screen.getByTestId("ml-deps-card");
+    expect(card).toBeInTheDocument();
+    expect(screen.getByTestId("ml-deps-summary")).toHaveTextContent(/2 of 5 installed/);
+    // installed extras render with ✓
+    expect(screen.getByTestId("ml-deps-extra-transcription")).toHaveTextContent(/✓/);
+    expect(screen.getByTestId("ml-deps-extra-llm_ollama")).toHaveTextContent(/✓/);
+    // missing extras render with ✗ and the missing module list
+    expect(screen.getByTestId("ml-deps-extra-embedding")).toHaveTextContent(/✗/);
+    expect(screen.getByTestId("ml-deps-extra-embedding")).toHaveTextContent(/transformers/);
+  });
+
+  it("greys the toggle when required extras are missing", () => {
+    setDeps({
+      extras: {
+        embedding: { installed: false, missing: ["laion_clap"] },
+        transcription: { installed: true, missing: [] },
+        stems: { installed: true, missing: [] },
+        llm_hf: { installed: true, missing: [] },
+        llm_ollama: { installed: true, missing: [] },
+      },
+    });
+    setStatus({
+      features: [clapFeature()],
+      models: [],
+      backends: backends(),
+    });
+
+    render(<MlFeaturesSection />);
+
+    const toggle = screen.getByTestId("ml-feature-toggle-embedding_similarity");
+    expect(toggle).toHaveAttribute("aria-disabled", "true");
+    // Install CTA renders with the missing extras listed
+    const cta = screen.getByTestId("ml-feature-deps-cta-embedding_similarity");
+    expect(cta).toHaveTextContent(/embedding/);
+  });
+
+  it("does not grey the toggle when feature deps are installed", () => {
+    setDeps({
+      extras: {
+        embedding: { installed: true, missing: [] },
+        transcription: { installed: true, missing: [] },
+        stems: { installed: true, missing: [] },
+        llm_hf: { installed: true, missing: [] },
+        llm_ollama: { installed: true, missing: [] },
+      },
+    });
+    setStatus({
+      features: [clapFeature()],
+      models: [],
+      backends: backends(),
+    });
+
+    render(<MlFeaturesSection />);
+
+    const toggle = screen.getByTestId("ml-feature-toggle-embedding_similarity");
+    expect(toggle).toHaveAttribute("aria-disabled", "false");
+    expect(
+      screen.queryByTestId("ml-feature-deps-cta-embedding_similarity"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not grey non-LLM features when only backend (LLM) extras are missing", () => {
+    // Regression: previously the toggle for embedding_similarity (kind=embedding,
+    // backend=hf) was incorrectly greyed because the helper unconditionally
+    // unioned backend.required_extras (`llm_hf`) into the feature's required
+    // set. Non-LLM features share the HF code path for model loading but
+    // declare their actual substrate via feature.required_extras.
+    setDeps({
+      extras: {
+        embedding: { installed: true, missing: [] },
+        transcription: { installed: true, missing: [] },
+        stems: { installed: true, missing: [] },
+        llm_hf: { installed: false, missing: ["accelerate"] },
+        llm_ollama: { installed: true, missing: [] },
+      },
+    });
+    setStatus({
+      features: [clapFeature()],
+      models: [],
+      backends: backends(),
+    });
+
+    render(<MlFeaturesSection />);
+
+    const toggle = screen.getByTestId("ml-feature-toggle-embedding_similarity");
+    expect(toggle).toHaveAttribute("aria-disabled", "false");
+    expect(
+      screen.queryByTestId("ml-feature-deps-cta-embedding_similarity"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("greys the LLM toggle for the active backend's missing extras (per-backend gating)", () => {
+    // Only HF deps missing — feature default in fixture is hf backend
+    setDeps({
+      extras: {
+        embedding: { installed: true, missing: [] },
+        transcription: { installed: true, missing: [] },
+        stems: { installed: true, missing: [] },
+        llm_hf: { installed: false, missing: ["transformers"] },
+        llm_ollama: { installed: true, missing: [] },
+      },
+    });
+    setStatus({
+      features: [llmFeature({ backend: "hf" })],
+      models: [],
+      backends: backends(),
+    });
+
+    render(<MlFeaturesSection />);
+
+    const toggle = screen.getByTestId("ml-feature-toggle-llm_naming_refinement");
+    expect(toggle).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("foundation backend never reports missing extras even when others miss", () => {
+    setDeps({
+      extras: {
+        embedding: { installed: false, missing: ["all"] },
+        transcription: { installed: false, missing: ["all"] },
+        stems: { installed: false, missing: ["all"] },
+        llm_hf: { installed: false, missing: ["all"] },
+        llm_ollama: { installed: false, missing: ["all"] },
+      },
+    });
+    setStatus({
+      features: [llmFeature({ backend: "foundation" })],
+      models: [],
+      backends: backends({ foundationAvail: true }),
+    });
+
+    render(<MlFeaturesSection />);
+
+    const toggle = screen.getByTestId("ml-feature-toggle-llm_naming_refinement");
+    expect(toggle).toHaveAttribute("aria-disabled", "false");
   });
 });

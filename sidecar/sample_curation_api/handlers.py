@@ -7,6 +7,7 @@ This module now only handles ML-related features (future: captioning, semantic s
 import platform
 import sys
 
+from sample_curation_api.deps import deps_status
 from sample_curation_api.models import (
     cancel_download as ml_cancel_download,
     download_model as ml_download_model,
@@ -94,6 +95,8 @@ HANDLERS = {
     "ml_remove_model": ml_remove_model,
     "ml_load_model": ml_load_model,
     "ml_unload_model": ml_unload_model,
+    # Runtime ML deps detection (vault-347l).
+    "deps_status": deps_status,
     # Future: "caption_sample": caption_sample,
     # Future: "semantic_search": semantic_search,
 }

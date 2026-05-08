@@ -22,6 +22,7 @@ function makeBackends(): MlBackendView[] {
       description: "Built into macOS",
       available: false,
       unavailable_reason: "Not yet wired",
+      required_extras: [],
     },
     {
       backend_id: "ollama",
@@ -29,6 +30,7 @@ function makeBackends(): MlBackendView[] {
       description: "Local daemon",
       available: true,
       unavailable_reason: null,
+      required_extras: ["llm_ollama"],
     },
     {
       backend_id: "hf",
@@ -36,6 +38,7 @@ function makeBackends(): MlBackendView[] {
       description: "In-app",
       available: true,
       unavailable_reason: null,
+      required_extras: ["llm_hf"],
     },
   ];
 }
@@ -56,6 +59,7 @@ function feat(overrides: Partial<MlFeatureView>): MlFeatureView {
     enabled: overrides.enabled ?? true,
     backend: overrides.backend ?? "hf",
     model_id: overrides.model_id ?? "facebook/htdemucs",
+    required_extras: overrides.required_extras ?? [],
   };
 }
 

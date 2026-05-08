@@ -802,6 +802,8 @@ fn main() {
             ml_commands::ml_load_model,
             ml_commands::ml_unload_model,
             ml_commands::ml_reload_model,
+            // Runtime ML deps detection (vault-347l)
+            ml_commands::deps_get_status,
             // Apple Foundation Models bridge (vault-3ume)
             foundation_models::llm_foundation_refine,
             foundation_models::llm_foundation_availability,

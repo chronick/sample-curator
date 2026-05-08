@@ -40,6 +40,9 @@ export interface MlFeatureView {
   enabled: boolean;
   backend: string;
   model_id: string;
+  /** Sidecar extras the feature itself depends on, regardless of backend
+   * (vault-347l). Per-backend extras live on `MlBackendView`. */
+  required_extras: string[];
 }
 
 export interface MlModelView {
@@ -67,6 +70,8 @@ export interface MlBackendView {
   description: string;
   available: boolean;
   unavailable_reason: string | null;
+  /** Sidecar extras this backend depends on (vault-347l). */
+  required_extras: string[];
 }
 
 export interface MlStatus {
@@ -75,13 +80,56 @@ export interface MlStatus {
   backends: MlBackendView[];
 }
 
+/** Per-extra install state from the sidecar's `deps_status` RPC (vault-347l). */
+export interface ExtraStatus {
+  installed: boolean;
+  missing: string[];
+}
+
+export interface DepsStatus {
+  extras: Record<string, ExtraStatus>;
+}
+
+/** Compute which of a (feature, backend) pair's required extras are
+ * missing. Returns an empty array when deps haven't loaded yet so we
+ * fail open during the brief mount window — Phase 1 keeps current
+ * behavior intact rather than greying every toggle on first paint. */
+export function missingExtrasForFeature(
+  feature: Pick<MlFeatureView, "required_extras" | "backend" | "kind">,
+  backends: MlBackendView[],
+  deps: DepsStatus | null,
+): string[] {
+  if (!deps || !deps.extras) return [];
+  const required = new Set<string>(feature.required_extras ?? []);
+  // Backend `required_extras` describe the substrate an LLM execution
+  // provider needs (llm_hf for HF inference, llm_ollama for the daemon
+  // client). Non-LLM features set `backend = "hf"` purely because they
+  // share the HF Hub model-loading path, but their actual substrate is
+  // declared on the feature (embedding/transcription/stems). Only fold
+  // backend extras in when the feature is the LLM one — otherwise we
+  // surface a false-positive "Missing: llm_hf" on every HF feature.
+  if (feature.kind === "llm") {
+    const backend = backends.find((b) => b.backend_id === feature.backend);
+    for (const e of backend?.required_extras ?? []) required.add(e);
+  }
+  const missing: string[] = [];
+  for (const extra of required) {
+    const status = deps.extras[extra];
+    if (!status || !status.installed) missing.push(extra);
+  }
+  return missing;
+}
+
 interface MlFeaturesState {
   status: MlStatus | null;
+  /** Sidecar ML deps install state (vault-347l). null until first fetch. */
+  deps: DepsStatus | null;
   loading: boolean;
   error: string | null;
   pollHandle: ReturnType<typeof setTimeout> | null;
 
   refresh: () => Promise<void>;
+  refreshDeps: () => Promise<void>;
   setFeatureEnabled: (featureId: string, enabled: boolean) => Promise<void>;
   setFeatureBackend: (featureId: string, backend: string) => Promise<void>;
   setFeatureModel: (featureId: string, modelId: string) => Promise<void>;
@@ -102,6 +150,7 @@ function isTransient(status: MlStatus | null): boolean {
 
 export const useMlFeaturesStore = create<MlFeaturesState>((set, get) => ({
   status: null,
+  deps: null,
   loading: false,
   error: null,
   pollHandle: null,
@@ -118,6 +167,18 @@ export const useMlFeaturesStore = create<MlFeaturesState>((set, get) => ({
       }
     } catch (e) {
       set({ error: e instanceof Error ? e.message : String(e), loading: false });
+    }
+  },
+
+  async refreshDeps() {
+    try {
+      const deps = await invoke<DepsStatus>("deps_get_status");
+      set({ deps });
+    } catch (e) {
+      // Don't surface deps fetch failures as the global ML error — the
+      // existing toggles still work without deps gating; we just lose
+      // the greyed-toggle UX. Log to console for diagnosis.
+      console.warn("deps_get_status failed", e);
     }
   },
 

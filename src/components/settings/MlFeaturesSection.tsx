@@ -1,25 +1,38 @@
 import { useEffect } from "react";
 import { Section, Button } from "./shared";
 import {
+  missingExtrasForFeature,
   useMlFeaturesStore,
+  type DepsStatus,
   type MlBackendView,
   type MlFeatureView,
   type MlModelView,
   type ModelState,
 } from "../../store/mlFeaturesStore";
 
+const EXTRA_LABELS: Record<string, string> = {
+  embedding: "Embedding (CLAP + transformers + torch)",
+  transcription: "Transcription (faster-whisper)",
+  stems: "Stem separation (demucs + torch)",
+  llm_hf: "LLM via HuggingFace (transformers + torch + accelerate)",
+  llm_ollama: "LLM via Ollama (ollama-py)",
+};
+
 export function MlFeaturesSection() {
   const status = useMlFeaturesStore((s) => s.status);
+  const deps = useMlFeaturesStore((s) => s.deps);
   const error = useMlFeaturesStore((s) => s.error);
   const refresh = useMlFeaturesStore((s) => s.refresh);
+  const refreshDeps = useMlFeaturesStore((s) => s.refreshDeps);
   const stopPolling = useMlFeaturesStore((s) => s.stopPolling);
 
   useEffect(() => {
     void refresh();
+    void refreshDeps();
     return () => {
       stopPolling();
     };
-  }, [refresh, stopPolling]);
+  }, [refresh, refreshDeps, stopPolling]);
 
   return (
     <Section title="ML features">
@@ -33,6 +46,7 @@ export function MlFeaturesSection() {
             {error}
           </p>
         )}
+        <DependenciesCard deps={deps} />
         {status ? (
           status.features.map((f) => (
             <FeatureRow
@@ -40,6 +54,7 @@ export function MlFeaturesSection() {
               feature={f}
               models={status.models}
               backends={status.backends}
+              deps={deps}
             />
           ))
         ) : (
@@ -50,14 +65,82 @@ export function MlFeaturesSection() {
   );
 }
 
+function DependenciesCard({ deps }: { deps: DepsStatus | null }) {
+  if (!deps || !deps.extras) {
+    return (
+      <div
+        className="bg-surface border border-surface-border rounded p-3"
+        data-testid="ml-deps-card"
+      >
+        <div className="text-sm font-medium text-gray-200">Dependencies</div>
+        <p className="text-[11px] text-gray-500 mt-1">Checking…</p>
+      </div>
+    );
+  }
+
+  const entries = Object.entries(deps.extras);
+  const allInstalled = entries.every(([, s]) => s.installed);
+
+  return (
+    <div
+      className="bg-surface border border-surface-border rounded p-3 space-y-2"
+      data-testid="ml-deps-card"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-medium text-gray-200">Dependencies</div>
+          <p className="text-[11px] text-gray-500 mt-0.5">
+            ML features rely on heavy Python libraries. The bundled sidecar ships without them — install
+            per-feature as needed.
+          </p>
+        </div>
+        <span
+          className={`text-[11px] shrink-0 ${
+            allInstalled ? "text-green-400" : "text-gray-400"
+          }`}
+          data-testid="ml-deps-summary"
+        >
+          {allInstalled ? "All installed" : `${entries.filter(([, s]) => s.installed).length} of ${entries.length} installed`}
+        </span>
+      </div>
+      <ul className="text-[11px] space-y-1 pt-1">
+        {entries.map(([name, status]) => (
+          <li
+            key={name}
+            className="flex items-center justify-between gap-2"
+            data-testid={`ml-deps-extra-${name}`}
+          >
+            <span className="text-gray-400">
+              <span className={status.installed ? "text-green-400" : "text-red-400"}>
+                {status.installed ? "✓" : "✗"}
+              </span>{" "}
+              {EXTRA_LABELS[name] ?? name}
+            </span>
+            {!status.installed && status.missing.length > 0 && (
+              <span
+                className="text-gray-500 truncate"
+                title={`Missing: ${status.missing.join(", ")}`}
+              >
+                missing: {status.missing.join(", ")}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function FeatureRow({
   feature,
   models,
   backends,
+  deps,
 }: {
   feature: MlFeatureView;
   models: MlModelView[];
   backends: MlBackendView[];
+  deps: DepsStatus | null;
 }) {
   const setEnabled = useMlFeaturesStore((s) => s.setFeatureEnabled);
   const setBackend = useMlFeaturesStore((s) => s.setFeatureBackend);
@@ -75,6 +158,13 @@ function FeatureRow({
     (m) => m.model_id === feature.model_id && m.backend === feature.backend,
   );
 
+  // Phase 1 of vault-347l: deps gating. Toggle is greyed when any
+  // required extra (feature ∪ active backend) reports installed=false.
+  // `missingExtrasForFeature` returns [] when deps haven't loaded yet,
+  // so first paint preserves existing toggle behavior.
+  const missingExtras = missingExtrasForFeature(feature, backends, deps);
+  const depsBlocked = missingExtras.length > 0;
+
   return (
     <div
       className="bg-surface border border-surface-border rounded p-3 space-y-2"
@@ -88,9 +178,19 @@ function FeatureRow({
         <FeatureToggle
           enabled={feature.enabled}
           onChange={(v) => void setEnabled(feature.feature_id, v)}
+          disabled={depsBlocked && !feature.enabled}
+          disabledReason={
+            depsBlocked
+              ? `Install dependencies first: ${missingExtras.map((e) => EXTRA_LABELS[e] ?? e).join(", ")}`
+              : undefined
+          }
           testId={`ml-feature-toggle-${feature.feature_id}`}
         />
       </div>
+
+      {depsBlocked && (
+        <DepsCta featureId={feature.feature_id} extras={missingExtras} />
+      )}
 
       {showBackendSelector && (
         <div className="flex items-center gap-2 pt-1">
@@ -166,10 +266,14 @@ function emptyModelHint(backend: string): string {
 function FeatureToggle({
   enabled,
   onChange,
+  disabled = false,
+  disabledReason,
   testId,
 }: {
   enabled: boolean;
   onChange: (v: boolean) => void;
+  disabled?: boolean;
+  disabledReason?: string;
   testId: string;
 }) {
   return (
@@ -177,11 +281,16 @@ function FeatureToggle({
       type="button"
       role="switch"
       aria-checked={enabled}
+      aria-disabled={disabled}
       data-testid={testId}
-      onClick={() => onChange(!enabled)}
+      onClick={() => {
+        if (disabled) return;
+        onChange(!enabled);
+      }}
+      title={disabled ? disabledReason : undefined}
       className={`shrink-0 relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
         enabled ? "bg-accent" : "bg-surface-border"
-      }`}
+      } ${disabled ? "opacity-40 cursor-not-allowed" : ""}`}
     >
       <span
         className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
@@ -189,6 +298,41 @@ function FeatureToggle({
         }`}
       />
     </button>
+  );
+}
+
+function DepsCta({ featureId, extras }: { featureId: string; extras: string[] }) {
+  const handleClick = () => {
+    // Phase 1 stub: alert-based explanation of next-step. Phase 2 swaps
+    // this for an actual install action wired through `deps_install`.
+    const list = extras.map((e) => `  --extra ${e.replace("_", "-")}`).join("\n");
+    alert(
+      [
+        `Install workflow lands in the next release (vault-347l Phase 2).`,
+        ``,
+        `For now, install in dev with:`,
+        `  cd sidecar`,
+        `  uv sync \\`,
+        list,
+      ].join("\n"),
+    );
+  };
+  return (
+    <div
+      className="flex items-center justify-between gap-2 bg-surface-hover border border-surface-border rounded px-2 py-1.5"
+      data-testid={`ml-feature-deps-cta-${featureId}`}
+    >
+      <span className="text-[11px] text-yellow-500">
+        Missing: {extras.join(", ")}
+      </span>
+      <Button
+        onClick={handleClick}
+        testId={`ml-feature-install-deps-${featureId}`}
+        title="Install the Python dependencies this feature needs"
+      >
+        Install dependencies
+      </Button>
+    </div>
   );
 }
 
