@@ -28,6 +28,16 @@ pub struct RecorderConfig {
     /// mode is a deliberate opt-in for auditing naming quality).
     #[serde(default)]
     pub llm_ab_test: bool,
+
+    /// vault-2nnt: when true, finalized recordings whose duration exceeds
+    /// the stem-separation threshold (5s, hardcoded in `stems::process_one`)
+    /// are auto-queued through demucs after save_to_library. The active
+    /// session can override this per-cycle via
+    /// `RecorderState.current_session.stem_separation_enabled` (T2a).
+    /// Default false — demucs is heavy (seconds-to-minutes per clip), so
+    /// the user opts in.
+    #[serde(default)]
+    pub auto_stem_separation: bool,
 }
 
 fn default_arm_threshold_db() -> f32 {
@@ -55,6 +65,7 @@ impl Default for RecorderConfig {
             arm_threshold_db: default_arm_threshold_db(),
             arm_silence_ms: default_arm_silence_ms(),
             llm_ab_test: false,
+            auto_stem_separation: false,
         }
     }
 }
@@ -123,6 +134,7 @@ mod tests {
         assert_eq!(config.arm_threshold_db, -40.0);
         assert_eq!(config.arm_silence_ms, 2000);
         assert!(!config.llm_ab_test);
+        assert!(!config.auto_stem_separation);
     }
 
     #[test]
@@ -136,6 +148,7 @@ mod tests {
             arm_threshold_db: -32.5,
             arm_silence_ms: 1500,
             llm_ab_test: true,
+            auto_stem_separation: true,
         };
         let json = serde_json::to_string(&config).unwrap();
         let parsed: RecorderConfig = serde_json::from_str(&json).unwrap();
@@ -147,6 +160,7 @@ mod tests {
         assert_eq!(parsed.arm_threshold_db, -32.5);
         assert_eq!(parsed.arm_silence_ms, 1500);
         assert!(parsed.llm_ab_test);
+        assert!(parsed.auto_stem_separation);
     }
 
     #[test]
@@ -163,6 +177,7 @@ mod tests {
         assert_eq!(parsed.arm_threshold_db, -40.0);
         assert_eq!(parsed.arm_silence_ms, 2000);
         assert!(!parsed.llm_ab_test);
+        assert!(!parsed.auto_stem_separation);
     }
 
     #[test]

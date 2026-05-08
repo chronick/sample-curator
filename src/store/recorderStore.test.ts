@@ -41,7 +41,7 @@ describe('useRecorderStore', () => {
         arm_threshold_db: -40,
         arm_silence_ms: 2000,
         llm_ab_test: false,
-      },
+    auto_stem_separation: false,      },
       isArmed: false,
       isRecording: false,
       isMonitoring: false,
@@ -113,7 +113,7 @@ describe('useRecorderStore', () => {
       arm_threshold_db: -30,
       arm_silence_ms: 1500,
       llm_ab_test: true,
-    };
+    auto_stem_separation: false,    };
     useRecorderStore.getState().setConfig(newConfig);
 
     const state = useRecorderStore.getState();

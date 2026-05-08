@@ -1,5 +1,7 @@
 import { useCallback, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { getNativeQuality, getNativeAudioInfo } from "../../hooks/useNativeAnalysis";
+import { useRecorderStore } from "../../store/recorderStore";
 import { Section, Button } from "./shared";
 import { MlFeaturesSection } from "./MlFeaturesSection";
 
@@ -7,6 +9,19 @@ export function AnalysisMlTab() {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
+  const config = useRecorderStore((s) => s.config);
+  const updateConfig = useRecorderStore((s) => s.updateConfig);
+
+  const persistAutoStems = useCallback(
+    (enabled: boolean) => {
+      const next = { ...config, auto_stem_separation: enabled };
+      updateConfig({ auto_stem_separation: enabled });
+      void invoke("recorder_set_config", { config: next }).catch((e) =>
+        console.warn("Failed to persist auto_stem_separation:", e)
+      );
+    },
+    [config, updateConfig]
+  );
 
   const handleTestAnalysis = useCallback(async () => {
     setTesting(true);
@@ -66,6 +81,29 @@ export function AnalysisMlTab() {
             </div>
           )}
         </div>
+      </Section>
+
+      <Section title="Stems">
+        <label
+          className="flex items-start gap-2 text-sm text-gray-300 cursor-pointer select-none"
+          data-testid="auto-stem-separation-toggle"
+        >
+          <input
+            type="checkbox"
+            checked={config.auto_stem_separation}
+            onChange={(e) => persistAutoStems(e.target.checked)}
+            className="mt-0.5 accent-pink-500"
+            aria-label="Auto-separate stems for new recordings"
+          />
+          <span>
+            <span className="block">Auto-separate stems on new recordings</span>
+            <span className="block text-[11px] text-gray-500">
+              Run demucs after every finalized recording (≥5s). The active recording
+              session can override this per-cycle from the recorder panel. Off by
+              default — demucs is heavy (seconds-to-minutes per clip).
+            </span>
+          </span>
+        </label>
       </Section>
 
       <MlFeaturesSection />

@@ -336,9 +336,17 @@ fn recorder_set_config(config: recorder::config::RecorderConfig, state: State<'_
 fn recorder_set_armed(
     armed: bool,
     state: State<'_, RecorderState>,
+    config_state: State<'_, RecorderConfigState>,
 ) -> Result<Option<recorder::audio_capture::CurrentSessionContext>, String> {
     if armed {
-        let session = state.arm_session()?;
+        // Inherit the global auto_stem_separation default at arm-on
+        // (vault-2nnt). The user can override it for the session via
+        // `recorder_set_session_stem_separation`.
+        let default_stems = config_state
+            .get()
+            .map(|c| c.auto_stem_separation)
+            .unwrap_or(false);
+        let session = state.arm_session(default_stems)?;
         Ok(Some(session))
     } else {
         state.disarm_session()?;
@@ -407,6 +415,7 @@ fn recorder_save_to_library(
     recorder_state: State<'_, RecorderState>,
     app_state: State<'_, AppState>,
     config_state: State<'_, RecorderConfigState>,
+    app: tauri::AppHandle,
 ) -> Result<RecorderSaveResult, String> {
     // Wait for writer thread to finish flushing the WAV before reading it
     recorder::audio_capture::wait_for_writer(&recorder_state, 30_000)?;
@@ -515,6 +524,27 @@ fn recorder_save_to_library(
             eprintln!("Background analysis errors: {:?}", result.errors);
         }
     });
+
+    // vault-2nnt: optionally auto-queue stem separation. Active session
+    // override (RecorderState.current_session.stem_separation_enabled,
+    // mutable per arm cycle) wins over the global default. The duration
+    // gate matches `stems::process_one` so we don't spawn a worker for
+    // a clip it would skip anyway.
+    let auto_stems_enabled = {
+        let session_override = recorder_state
+            .session_snapshot()
+            .ok()
+            .flatten()
+            .map(|s| s.stem_separation_enabled);
+        let global_default = config_state
+            .get()
+            .map(|c| c.auto_stem_separation)
+            .unwrap_or(false);
+        session_override.unwrap_or(global_default)
+    };
+    if auto_stems_enabled && duration >= 5.0 {
+        let _ = stems::separate_stems(vec![sample_id], app);
+    }
 
     Ok(RecorderSaveResult {
         sample_id,

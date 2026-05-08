@@ -32,7 +32,7 @@ vi.mock("../store/recorderStore", () => {
       arm_threshold_db: -40,
       arm_silence_ms: 2000,
       llm_ab_test: false,
-    },
+    auto_stem_separation: false,    },
     isArmed: false,
     setIsArmed: vi.fn(),
     isRecording: false,

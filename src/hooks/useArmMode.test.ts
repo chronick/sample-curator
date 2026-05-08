@@ -32,7 +32,7 @@ describe("useArmMode", () => {
         arm_threshold_db: -40,
         arm_silence_ms: 2000,
         llm_ab_test: false,
-      },
+    auto_stem_separation: false,      },
     });
     vi.useFakeTimers({ shouldAdvanceTime: false });
     vi.setSystemTime(new Date("2026-04-15T12:00:00Z"));

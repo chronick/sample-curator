@@ -60,6 +60,13 @@ export interface RecorderConfig {
    * LLM-refined name. The UI shows both side-by-side. Default false.
    */
   llm_ab_test: boolean;
+  /**
+   * vault-2nnt: when true, finalized recordings >=5s are auto-queued
+   * through demucs after save. The active session can override this
+   * per arm cycle via `recorder_set_session_stem_separation`. Default
+   * false — demucs is heavy.
+   */
+  auto_stem_separation: boolean;
 }
 
 export interface SaveResult {

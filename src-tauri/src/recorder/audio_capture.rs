@@ -262,7 +262,14 @@ impl RecorderState {
     /// Arm-on lifecycle hook. Idempotent: repeated calls without an
     /// intervening disarm return the existing session unchanged so the
     /// `session_tag` stays stable across the entire arm cycle.
-    pub fn arm_session(&self) -> Result<CurrentSessionContext, String> {
+    ///
+    /// `default_stem_separation_enabled` is the Settings global (vault-2nnt
+    /// `RecorderConfig.auto_stem_separation`). The session inherits this at
+    /// arm-on; the user can mutate it for the cycle via `set_stem_separation`.
+    pub fn arm_session(
+        &self,
+        default_stem_separation_enabled: bool,
+    ) -> Result<CurrentSessionContext, String> {
         let mut guard = self.current_session.lock().map_err(|e| e.to_string())?;
         if let Some(existing) = guard.as_ref() {
             return Ok(existing.clone());
@@ -270,8 +277,7 @@ impl RecorderState {
         let session = CurrentSessionContext {
             session_tag: format!("session:{}", Uuid::new_v4()),
             started_at: Utc::now(),
-            // Placeholder until the Settings global is wired in T5.
-            stem_separation_enabled: false,
+            stem_separation_enabled: default_stem_separation_enabled,
         };
         *guard = Some(session.clone());
         Ok(session)
@@ -985,7 +991,7 @@ mod tests {
     #[test]
     fn arm_session_creates_session_with_session_tag_prefix() {
         let state = RecorderState::new();
-        let session = state.arm_session().unwrap();
+        let session = state.arm_session(false).unwrap();
         assert!(session.session_tag.starts_with("session:"));
         // UUID v4 string is 36 chars; session_tag adds the "session:" (8) prefix.
         assert_eq!(session.session_tag.len(), 8 + 36);
@@ -995,10 +1001,21 @@ mod tests {
     }
 
     #[test]
+    fn arm_session_inherits_global_stem_separation_default() {
+        let state = RecorderState::new();
+        let session = state.arm_session(true).unwrap();
+        assert!(session.stem_separation_enabled);
+        // Mid-session override still works.
+        state.set_stem_separation(false).unwrap();
+        let snap = state.session_snapshot().unwrap().unwrap();
+        assert!(!snap.stem_separation_enabled);
+    }
+
+    #[test]
     fn arm_session_is_idempotent_within_one_arm_cycle() {
         let state = RecorderState::new();
-        let first = state.arm_session().unwrap();
-        let second = state.arm_session().unwrap();
+        let first = state.arm_session(false).unwrap();
+        let second = state.arm_session(false).unwrap();
         let snap = state.session_snapshot().unwrap().unwrap();
         assert_eq!(first.session_tag, second.session_tag);
         assert_eq!(first.session_tag, snap.session_tag);
@@ -1008,7 +1025,7 @@ mod tests {
     #[test]
     fn disarm_clears_session() {
         let state = RecorderState::new();
-        state.arm_session().unwrap();
+        state.arm_session(false).unwrap();
         state.disarm_session().unwrap();
         assert!(state.session_snapshot().unwrap().is_none());
     }
@@ -1016,16 +1033,16 @@ mod tests {
     #[test]
     fn rearm_generates_fresh_uuid() {
         let state = RecorderState::new();
-        let first = state.arm_session().unwrap();
+        let first = state.arm_session(false).unwrap();
         state.disarm_session().unwrap();
-        let second = state.arm_session().unwrap();
+        let second = state.arm_session(false).unwrap();
         assert_ne!(first.session_tag, second.session_tag);
     }
 
     #[test]
     fn set_stem_separation_mutates_active_session() {
         let state = RecorderState::new();
-        state.arm_session().unwrap();
+        state.arm_session(false).unwrap();
         state.set_stem_separation(true).unwrap();
         let snap = state.session_snapshot().unwrap().unwrap();
         assert!(snap.stem_separation_enabled);
@@ -1055,7 +1072,7 @@ mod tests {
         // Mirrors the read pattern in `stop_recording`: clone the
         // session_tag out of the live mutex while armed.
         let state = RecorderState::new();
-        let session = state.arm_session().unwrap();
+        let session = state.arm_session(false).unwrap();
         let snapshot = state
             .current_session
             .lock()
@@ -1070,7 +1087,7 @@ mod tests {
         // The race we're guarding: disarm clears `current_session` to
         // None, but the cloned snapshot must remain intact.
         let state = RecorderState::new();
-        state.arm_session().unwrap();
+        state.arm_session(false).unwrap();
         let snapshot = state
             .current_session
             .lock()
@@ -1089,7 +1106,7 @@ mod tests {
         // Cycle A: arm, snapshot, disarm. Cycle B: re-arm with a fresh
         // UUID. Cycle A's snapshot is unaffected.
         let state = RecorderState::new();
-        state.arm_session().unwrap();
+        state.arm_session(false).unwrap();
         let snapshot_a = state
             .current_session
             .lock()
@@ -1098,7 +1115,7 @@ mod tests {
             .map(|s| s.session_tag.clone())
             .unwrap();
         state.disarm_session().unwrap();
-        let session_b = state.arm_session().unwrap();
+        let session_b = state.arm_session(false).unwrap();
         let snapshot_b = state
             .current_session
             .lock()
