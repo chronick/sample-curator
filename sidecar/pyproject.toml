@@ -105,10 +105,13 @@ llm = [
 # default Qwen 2.5 0.5B Instruct. transformers + torch already ship with
 # the embedding extra, but we list them here so users can install
 # `[llm-hf]` without pulling in CLAP.
+#
+# ``accelerate`` was previously required for ``device_map="cpu"`` but
+# llm.py now omits device_map (CPU is the default) so accelerate is no
+# longer needed for inference. Re-add if/when GPU/MPS dispatch lands.
 llm-hf = [
     "transformers>=4.40",
     "torch>=2.0.0",
-    "accelerate>=0.25.0",
 ]
 
 # All optional features

@@ -63,6 +63,28 @@ class TestDepsStatusDetection:
             assert status["missing"] == []
 
 
+class TestExtraModulesContract:
+    """Pin known-correct module sets for each extra so the deps panel
+    doesn't drift from what the runtime actually needs."""
+
+    def test_llm_hf_does_not_require_accelerate(self):
+        # llm.py deliberately omits ``device_map="cpu"`` to avoid the
+        # accelerate dep — surfacing it as required would mislead users
+        # into installing a library they don't need. If a future change
+        # re-adds accelerate, this test should fail and EXTRA_MODULES
+        # should be updated alongside the runtime change.
+        assert "accelerate" not in EXTRA_MODULES["llm_hf"]
+        assert set(EXTRA_MODULES["llm_hf"]) == {"transformers", "torch"}
+
+    def test_embedding_includes_clap_substrate(self):
+        assert set(EXTRA_MODULES["embedding"]) >= {"transformers", "torch", "laion_clap"}
+
+    def test_transcription_uses_faster_whisper_module_name(self):
+        # Package name is `faster-whisper` but the module imports as `faster_whisper`
+        assert "faster_whisper" in EXTRA_MODULES["transcription"]
+        assert "faster-whisper" not in EXTRA_MODULES["transcription"]
+
+
 class TestDepsHandlerRegistration:
     def test_deps_status_registered(self):
         assert "deps_status" in HANDLERS

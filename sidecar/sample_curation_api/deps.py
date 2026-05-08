@@ -1,10 +1,10 @@
 """Runtime ML dependency detection (vault-347l).
 
 Each ML feature in Sample Curator depends on one or more heavy Python
-extras (transformers, torch, faster-whisper, demucs, accelerate,
-ollama). The bundled production sidecar ships without them — this
-module reports which extras are present so the UI can surface install
-state and grey out toggles whose deps are missing.
+extras (transformers, torch, faster-whisper, demucs, ollama). The
+bundled production sidecar ships without them — this module reports
+which extras are present so the UI can surface install state and grey
+out toggles whose deps are missing.
 
 Phase 1: read-only detection. Phase 2 (separate task) wires actual
 install via a uv-managed runtime venv.
@@ -32,7 +32,10 @@ EXTRA_MODULES: dict[str, list[str]] = {
     "embedding": ["transformers", "torch", "laion_clap", "torchvision"],
     "transcription": ["faster_whisper"],
     "stems": ["demucs", "torch"],
-    "llm_hf": ["transformers", "torch", "accelerate"],
+    # ``accelerate`` is intentionally NOT required: ``llm.py`` deliberately
+    # avoids ``device_map="cpu"`` so the model loads on plain torch on CPU.
+    # If we add GPU/MPS dispatch later we'll re-add accelerate here.
+    "llm_hf": ["transformers", "torch"],
     "llm_ollama": ["ollama"],
 }
 
