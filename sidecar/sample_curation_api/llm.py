@@ -153,11 +153,41 @@ HF_LLM_MODELS: frozenset[str] = frozenset({
 
 
 def _refine_with_hf(transcript: str, model_id: str) -> str | None:
-    """Refine via a loaded HuggingFace causal-LM. Reads from ``models._LOADED``;
-    returns ``None`` if the model isn't loaded (the user should toggle the
-    feature on or click Load in Settings first).
+    """Refine via a HF causal-LM.
+
+    Routing (vault-347l Phase 2 slice 4):
+
+    - If the runtime venv at ``~/.music-hub-data/python/runtime/.venv``
+      exists, delegate to the worker subprocess. This is the prod path
+      — frozen sidecars can't import transformers themselves.
+    - Otherwise, fall back to in-process loading via
+      ``models._LOADED[model_id]``. Dev path — the user's sidecar venv
+      has the libs from ``uv sync --extra llm-hf``.
     """
-    # Local import to avoid circular: models -> llm via _instantiate_model.
+    from sample_curation_api import worker_manager
+
+    if worker_manager.runtime_venv_exists():
+        prompt = LLM_PROMPT_TEMPLATE.format(transcript=transcript.strip())
+        try:
+            result = worker_manager.get_worker().call(
+                "refine_llm_hf",
+                {"model_id": model_id, "prompt": prompt},
+            )
+        except worker_manager.WorkerError as e:
+            log.warning("HF LLM refinement via worker failed: %s", e)
+            return None
+        text = result.get("text") if isinstance(result, dict) else None
+        if text is None:
+            err = result.get("error") if isinstance(result, dict) else None
+            if err:
+                log.info("HF LLM worker soft-error: %s", err)
+            return None
+        sanitized = _sanitize_stem(text)
+        if not sanitized or len(sanitized) < 3 or len(sanitized) > 60:
+            return None
+        return sanitized
+
+    # Dev fallback — load happened in-process via models._LOADED.
     from sample_curation_api import models as ml_models
 
     loaded = ml_models._LOADED.get(model_id)

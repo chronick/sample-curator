@@ -127,8 +127,89 @@ def separate_demucs(model_id: str, audio_path: str, output_dir: str) -> dict:
     )
 
 
-def refine_llm_hf(model_id: str, prompt: str) -> dict:
-    return _not_implemented("refine_llm_hf", model_id=model_id, prompt_len=len(prompt))
+def refine_llm_hf(model_id: str, prompt: str, max_new_tokens: int = 24) -> dict:
+    """Run Qwen / similar HF causal-LM inference. Loads the model once
+    per (model_id) and reuses across calls. Returns ``{"text": ...}``
+    or ``{"text": None, "error": ...}``.
+
+    The sidecar already snapshotted the weights to disk at
+    ``~/.music-hub-data/ml-models/<safe_id>/`` via the existing
+    HF download path; the worker reads from there. The frozen sidecar
+    is responsible for downloading; the worker only loads.
+    """
+    try:
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+        import torch
+    except ImportError as e:
+        return {
+            "text": None,
+            "error": f"transformers/torch not available in runtime venv: {e}",
+        }
+
+    state_key = f"llm:{model_id}"
+    with _LOADED_LOCK:
+        cached = _LOADED.get(state_key)
+        # First-time load: snapshot dir lives at the same canonical path
+        # the sidecar uses. We replicate the layout instead of importing
+        # sample_curation_api (the worker is intentionally self-contained).
+        if cached is None:
+            ckpt_dir = _hf_snapshot_dir(model_id)
+            if not (ckpt_dir / "config.json").is_file():
+                return {
+                    "text": None,
+                    "error": f"No config.json in {ckpt_dir} — download via Settings first.",
+                }
+            try:
+                tok = AutoTokenizer.from_pretrained(str(ckpt_dir))
+                model = AutoModelForCausalLM.from_pretrained(
+                    str(ckpt_dir),
+                    dtype=torch.float32,  # transformers 5.x naming
+                )
+                model.eval()
+            except Exception as e:
+                return {"text": None, "error": f"load failed: {e}"}
+            cached = {"tokenizer": tok, "model": model}
+            _LOADED[state_key] = cached
+            _LOADED["kind"] = "llm"
+            _LOADED["model_id"] = model_id
+            _LOADED["backend"] = "hf"
+            _LOADED["loaded"] = True
+        tok = cached["tokenizer"]
+        model = cached["model"]
+
+    try:
+        if getattr(tok, "chat_template", None):
+            encoded = tok.apply_chat_template(
+                [{"role": "user", "content": prompt}],
+                return_tensors="pt",
+                add_generation_prompt=True,
+            )
+        else:
+            encoded = tok(prompt, return_tensors="pt")
+        input_ids = getattr(encoded, "input_ids", encoded)
+
+        with torch.no_grad():
+            output = model.generate(
+                input_ids,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                pad_token_id=getattr(tok, "pad_token_id", None) or tok.eos_token_id,
+            )
+        new_tokens = output[0][input_ids.shape[-1]:]
+        text = tok.decode(new_tokens, skip_special_tokens=True)
+        return {"text": text}
+    except Exception as e:
+        traceback.print_exc(file=sys.stderr)
+        return {"text": None, "error": f"generate failed: {e}"}
+
+
+def _hf_snapshot_dir(model_id: str):
+    """Mirror ``models._model_path`` so the worker reads from the same
+    location the sidecar wrote to. Kept inline (not imported) so the
+    worker stays self-contained."""
+    from pathlib import Path
+    safe = model_id.replace("/", "__")
+    return Path.home() / ".music-hub-data" / "ml-models" / safe
 
 
 def _not_implemented(method: str, **ctx: Any) -> dict:

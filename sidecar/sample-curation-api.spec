@@ -83,6 +83,15 @@ except Exception:
 # compile time via ``include_str!``.
 datas += [("sample_curation_api/llm_prompt.txt", "sample_curation_api")]
 
+# vault-347l Phase 2 slice 4: ml_worker.py runs as a subprocess from
+# the runtime venv (not the frozen sidecar's interpreter). Bundle it
+# into the frozen output so worker_manager._resolve_worker_script() can
+# pick it up at sys._MEIPASS / "ml_worker.py" in prod. Tauri also bundles
+# a copy at .app/Contents/Resources/ml_worker.py for symmetry — either
+# path works; PyInstaller is the canonical location for the frozen
+# binary and resource_dir is the override path for tests / Rust.
+datas += [("ml_worker.py", ".")]
+
 # ============ Build ============
 a = Analysis(
     ["run_sidecar.py"],

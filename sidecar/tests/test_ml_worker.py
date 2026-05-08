@@ -147,7 +147,6 @@ class TestStubs:
                 "separate_demucs",
                 {"model_id": "facebook/htdemucs", "audio_path": "/tmp/x.wav", "output_dir": "/tmp"},
             ),
-            ("refine_llm_hf", {"model_id": "Qwen/Qwen2.5-0.5B-Instruct", "prompt": "hello"}),
         ],
     )
     def test_stub_returns_not_implemented(self, worker, method, params):
@@ -155,3 +154,31 @@ class TestStubs:
         assert "result" in resp, f"got error: {resp.get('error')}"
         assert resp["result"]["status"] == "not_implemented"
         assert resp["result"]["method"] == method
+
+
+class TestRefineLlmHf:
+    """``refine_llm_hf`` is real in slice 4. The worker either loads
+    the model from disk and runs inference, or returns a soft-error
+    payload (``{"text": null, "error": ...}``) when prerequisites
+    aren't met. We can't run the full model in CI without weights, so
+    these tests cover the soft-error branches and the response shape."""
+
+    def test_missing_snapshot_returns_soft_error(self, worker):
+        # Use a model_id that no Settings download has produced —
+        # snapshot dir won't exist, worker should return error not raise.
+        resp = _send(
+            worker,
+            "refine_llm_hf",
+            {"model_id": "nonexistent/model-for-test", "prompt": "hi"},
+        )
+        assert "result" in resp, f"got error: {resp.get('error')}"
+        result = resp["result"]
+        assert result.get("text") is None
+        assert "error" in result
+        # Either the snapshot is missing, or transformers itself is missing —
+        # both are valid soft-error paths and surface a useful message.
+        assert (
+            "config.json" in result["error"]
+            or "transformers" in result["error"]
+            or "torch" in result["error"]
+        )
