@@ -58,7 +58,8 @@
     "resources": {
       "../sidecar/dist/sample-curation-api/": "sidecar/",
       "resources/uv": "uv",
-      "resources/runtime-pyproject.toml": "runtime-pyproject.toml"
+      "resources/runtime-pyproject.toml": "runtime-pyproject.toml",
+      "../sidecar/ml_worker.py": "ml_worker.py"
     },
     "shortDescription": "",
     "targets": "all",
