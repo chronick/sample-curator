@@ -22,6 +22,12 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
 }));
 
+vi.mock("@tauri-apps/api/event", () => ({
+  // Stub listener — returns a no-op unsub. Tests that need to drive
+  // events use the store actions directly instead of going through Tauri.
+  listen: vi.fn(async () => () => {}),
+}));
+
 function backends(opts: {
   foundationAvail?: boolean;
   ollamaAvail?: boolean;
@@ -110,6 +116,18 @@ function setDeps(deps: DepsStatus | null) {
   useMlFeaturesStore.setState({ deps });
 }
 
+function setInstall(partial: Partial<ReturnType<typeof useMlFeaturesStore.getState>["install"]>) {
+  useMlFeaturesStore.setState({
+    install: {
+      running: false,
+      pendingExtras: [],
+      log: [],
+      lastResult: null,
+      ...partial,
+    },
+  });
+}
+
 function setStatus(status: MlStatus | null) {
   useMlFeaturesStore.setState({ status, error: null });
 }
@@ -122,10 +140,15 @@ beforeEach(() => {
     backends: backends(),
   });
   setStatus(null);
+  // Install state leaks across tests (zustand singleton). Reset to
+  // pristine so e.g. a leftover ``running: true`` from one test
+  // doesn't short-circuit ``installDeps`` in the next.
+  setInstall({});
 });
 
 afterEach(() => {
   setStatus(null);
+  setInstall({});
 });
 
 describe("MlFeaturesSection — backend selector (vault-3ume)", () => {
@@ -485,5 +508,152 @@ describe("MlFeaturesSection — deps gating (vault-347l)", () => {
 
     const toggle = screen.getByTestId("ml-feature-toggle-llm_naming_refinement");
     expect(toggle).toHaveAttribute("aria-disabled", "false");
+  });
+});
+
+describe("MlFeaturesSection — install workflow (vault-347l Phase 2 slice 5)", () => {
+  it("renders Install buttons next to missing extras", () => {
+    setDeps({
+      extras: {
+        embedding: { installed: false, missing: ["transformers"] },
+        transcription: { installed: true, missing: [] },
+        stems: { installed: false, missing: ["demucs"] },
+        llm_hf: { installed: false, missing: ["transformers"] },
+        llm_ollama: { installed: true, missing: [] },
+      },
+    });
+    setStatus({ features: [], models: [], backends: backends() });
+
+    render(<MlFeaturesSection />);
+
+    expect(screen.getByTestId("ml-deps-install-embedding")).toBeInTheDocument();
+    expect(screen.getByTestId("ml-deps-install-stems")).toBeInTheDocument();
+    expect(screen.getByTestId("ml-deps-install-llm_hf")).toBeInTheDocument();
+    // Installed extras get an Uninstall, not Install.
+    expect(screen.queryByTestId("ml-deps-install-transcription")).not.toBeInTheDocument();
+    expect(screen.getByTestId("ml-deps-uninstall-transcription")).toBeInTheDocument();
+    expect(screen.getByTestId("ml-deps-uninstall-llm_ollama")).toBeInTheDocument();
+  });
+
+  it("clicking Install invokes deps_install with the extra", async () => {
+    setDeps({
+      extras: {
+        embedding: { installed: false, missing: ["transformers"] },
+        transcription: { installed: true, missing: [] },
+        stems: { installed: true, missing: [] },
+        llm_hf: { installed: true, missing: [] },
+        llm_ollama: { installed: true, missing: [] },
+      },
+    });
+    setStatus({ features: [], models: [], backends: backends() });
+
+    render(<MlFeaturesSection />);
+    invokeMock.mockClear();
+    fireEvent.click(screen.getByTestId("ml-deps-install-embedding"));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("deps_install", { extras: ["embedding"] });
+    });
+  });
+
+  it("clicking Uninstall invokes deps_uninstall with the extra", async () => {
+    setDeps({
+      extras: {
+        embedding: { installed: true, missing: [] },
+        transcription: { installed: true, missing: [] },
+        stems: { installed: true, missing: [] },
+        llm_hf: { installed: true, missing: [] },
+        llm_ollama: { installed: true, missing: [] },
+      },
+    });
+    setStatus({ features: [], models: [], backends: backends() });
+
+    render(<MlFeaturesSection />);
+    invokeMock.mockClear();
+    fireEvent.click(screen.getByTestId("ml-deps-uninstall-embedding"));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("deps_uninstall", { extras: ["embedding"] });
+    });
+  });
+
+  it("disables Install/Uninstall buttons while another install is running", () => {
+    setDeps({
+      extras: {
+        embedding: { installed: false, missing: ["transformers"] },
+        transcription: { installed: true, missing: [] },
+        stems: { installed: true, missing: [] },
+        llm_hf: { installed: true, missing: [] },
+        llm_ollama: { installed: true, missing: [] },
+      },
+    });
+    setInstall({ running: true, pendingExtras: ["transcription"] });
+    setStatus({ features: [], models: [], backends: backends() });
+
+    render(<MlFeaturesSection />);
+
+    // Both install AND uninstall buttons should reflect the busy state
+    expect(screen.getByTestId("ml-deps-install-embedding")).toBeDisabled();
+    expect(screen.getByTestId("ml-deps-uninstall-transcription")).toBeDisabled();
+  });
+
+  it("renders the install progress modal when install is running", () => {
+    setInstall({
+      running: true,
+      pendingExtras: ["embedding"],
+      log: [
+        { kind: "info", line: "Running uv sync --extra embedding" },
+        { kind: "stdout", line: "Resolved 14 packages" },
+        { kind: "stdout", line: "Downloaded transformers-4.45.0" },
+      ],
+    });
+    setStatus({ features: [], models: [], backends: backends() });
+
+    render(<MlFeaturesSection />);
+
+    expect(screen.getByTestId("ml-install-progress-modal")).toBeInTheDocument();
+    const log = screen.getByTestId("ml-install-progress-log");
+    expect(log).toHaveTextContent(/Running uv sync/);
+    expect(log).toHaveTextContent(/Resolved 14 packages/);
+    expect(log).toHaveTextContent(/Downloaded transformers/);
+    // Close button is hidden while running
+    expect(screen.queryByTestId("ml-install-progress-close")).not.toBeInTheDocument();
+  });
+
+  it("modal shows error and a Close button on failed install", () => {
+    setInstall({
+      running: false,
+      pendingExtras: ["stems"],
+      log: [{ kind: "stderr", line: "error: failed to fetch demucs" }],
+      lastResult: { success: false, error: "uv sync exited with code 1" },
+    });
+    setStatus({ features: [], models: [], backends: backends() });
+
+    render(<MlFeaturesSection />);
+
+    expect(screen.getByText(/Install failed/)).toBeInTheDocument();
+    expect(screen.getByText(/uv sync exited with code 1/)).toBeInTheDocument();
+    expect(screen.getByTestId("ml-install-progress-dismiss")).toBeInTheDocument();
+  });
+
+  it("per-feature CTA install button calls deps_install with the missing extras", async () => {
+    setDeps({
+      extras: {
+        embedding: { installed: false, missing: ["laion_clap"] },
+        transcription: { installed: true, missing: [] },
+        stems: { installed: true, missing: [] },
+        llm_hf: { installed: true, missing: [] },
+        llm_ollama: { installed: true, missing: [] },
+      },
+    });
+    setStatus({ features: [clapFeature()], models: [], backends: backends() });
+
+    render(<MlFeaturesSection />);
+    invokeMock.mockClear();
+    fireEvent.click(screen.getByTestId("ml-feature-install-deps-embedding_similarity"));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("deps_install", { extras: ["embedding"] });
+    });
   });
 });

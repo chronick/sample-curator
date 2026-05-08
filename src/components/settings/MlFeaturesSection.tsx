@@ -1,9 +1,10 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Section, Button } from "./shared";
 import {
   missingExtrasForFeature,
   useMlFeaturesStore,
   type DepsStatus,
+  type InstallState,
   type MlBackendView,
   type MlFeatureView,
   type MlModelView,
@@ -21,18 +22,23 @@ const EXTRA_LABELS: Record<string, string> = {
 export function MlFeaturesSection() {
   const status = useMlFeaturesStore((s) => s.status);
   const deps = useMlFeaturesStore((s) => s.deps);
+  const install = useMlFeaturesStore((s) => s.install);
   const error = useMlFeaturesStore((s) => s.error);
   const refresh = useMlFeaturesStore((s) => s.refresh);
   const refreshDeps = useMlFeaturesStore((s) => s.refreshDeps);
   const stopPolling = useMlFeaturesStore((s) => s.stopPolling);
+  const subscribeInstall = useMlFeaturesStore((s) => s.subscribeInstall);
+  const unsubscribeInstall = useMlFeaturesStore((s) => s.unsubscribeInstall);
 
   useEffect(() => {
     void refresh();
     void refreshDeps();
+    void subscribeInstall();
     return () => {
       stopPolling();
+      unsubscribeInstall();
     };
-  }, [refresh, refreshDeps, stopPolling]);
+  }, [refresh, refreshDeps, stopPolling, subscribeInstall, unsubscribeInstall]);
 
   return (
     <Section title="ML features">
@@ -46,7 +52,7 @@ export function MlFeaturesSection() {
             {error}
           </p>
         )}
-        <DependenciesCard deps={deps} />
+        <DependenciesCard deps={deps} install={install} />
         {status ? (
           status.features.map((f) => (
             <FeatureRow
@@ -55,17 +61,28 @@ export function MlFeaturesSection() {
               models={status.models}
               backends={status.backends}
               deps={deps}
+              install={install}
             />
           ))
         ) : (
           <p className="text-xs text-gray-500">Loading…</p>
         )}
       </div>
+      {(install.running || install.lastResult) && <InstallProgressModal install={install} />}
     </Section>
   );
 }
 
-function DependenciesCard({ deps }: { deps: DepsStatus | null }) {
+function DependenciesCard({
+  deps,
+  install,
+}: {
+  deps: DepsStatus | null;
+  install: InstallState;
+}) {
+  const installDeps = useMlFeaturesStore((s) => s.installDeps);
+  const uninstallDeps = useMlFeaturesStore((s) => s.uninstallDeps);
+
   if (!deps || !deps.extras) {
     return (
       <div
@@ -80,6 +97,7 @@ function DependenciesCard({ deps }: { deps: DepsStatus | null }) {
 
   const entries = Object.entries(deps.extras);
   const allInstalled = entries.every(([, s]) => s.installed);
+  const busy = install.running;
 
   return (
     <div
@@ -110,20 +128,39 @@ function DependenciesCard({ deps }: { deps: DepsStatus | null }) {
             className="flex items-center justify-between gap-2"
             data-testid={`ml-deps-extra-${name}`}
           >
-            <span className="text-gray-400">
+            <span className="text-gray-400 truncate">
               <span className={status.installed ? "text-green-400" : "text-red-400"}>
                 {status.installed ? "✓" : "✗"}
               </span>{" "}
               {EXTRA_LABELS[name] ?? name}
+              {!status.installed && status.missing.length > 0 && (
+                <span className="text-gray-500 ml-2 opacity-70">
+                  missing: {status.missing.join(", ")}
+                </span>
+              )}
             </span>
-            {!status.installed && status.missing.length > 0 && (
-              <span
-                className="text-gray-500 truncate"
-                title={`Missing: ${status.missing.join(", ")}`}
-              >
-                missing: {status.missing.join(", ")}
-              </span>
-            )}
+            <span className="shrink-0 flex items-center gap-1">
+              {status.installed ? (
+                <Button
+                  onClick={() => void uninstallDeps([name])}
+                  disabled={busy}
+                  variant="danger"
+                  testId={`ml-deps-uninstall-${name}`}
+                  title={`Uninstall ${EXTRA_LABELS[name] ?? name}`}
+                >
+                  Uninstall
+                </Button>
+              ) : (
+                <Button
+                  onClick={() => void installDeps([name])}
+                  disabled={busy}
+                  testId={`ml-deps-install-${name}`}
+                  title={`Install ${EXTRA_LABELS[name] ?? name}`}
+                >
+                  Install
+                </Button>
+              )}
+            </span>
           </li>
         ))}
       </ul>
@@ -136,11 +173,13 @@ function FeatureRow({
   models,
   backends,
   deps,
+  install,
 }: {
   feature: MlFeatureView;
   models: MlModelView[];
   backends: MlBackendView[];
   deps: DepsStatus | null;
+  install: InstallState;
 }) {
   const setEnabled = useMlFeaturesStore((s) => s.setFeatureEnabled);
   const setBackend = useMlFeaturesStore((s) => s.setFeatureBackend);
@@ -189,7 +228,7 @@ function FeatureRow({
       </div>
 
       {depsBlocked && (
-        <DepsCta featureId={feature.feature_id} extras={missingExtras} />
+        <DepsCta featureId={feature.feature_id} extras={missingExtras} busy={install.running} />
       )}
 
       {showBackendSelector && (
@@ -301,22 +340,16 @@ function FeatureToggle({
   );
 }
 
-function DepsCta({ featureId, extras }: { featureId: string; extras: string[] }) {
-  const handleClick = () => {
-    // Phase 1 stub: alert-based explanation of next-step. Phase 2 swaps
-    // this for an actual install action wired through `deps_install`.
-    const list = extras.map((e) => `  --extra ${e.replace("_", "-")}`).join("\n");
-    alert(
-      [
-        `Install workflow lands in the next release (vault-347l Phase 2).`,
-        ``,
-        `For now, install in dev with:`,
-        `  cd sidecar`,
-        `  uv sync \\`,
-        list,
-      ].join("\n"),
-    );
-  };
+function DepsCta({
+  featureId,
+  extras,
+  busy,
+}: {
+  featureId: string;
+  extras: string[];
+  busy: boolean;
+}) {
+  const installDeps = useMlFeaturesStore((s) => s.installDeps);
   return (
     <div
       className="flex items-center justify-between gap-2 bg-surface-hover border border-surface-border rounded px-2 py-1.5"
@@ -326,12 +359,93 @@ function DepsCta({ featureId, extras }: { featureId: string; extras: string[] })
         Missing: {extras.join(", ")}
       </span>
       <Button
-        onClick={handleClick}
+        onClick={() => void installDeps(extras)}
+        disabled={busy}
         testId={`ml-feature-install-deps-${featureId}`}
         title="Install the Python dependencies this feature needs"
       >
-        Install dependencies
+        {busy ? "Installing…" : "Install dependencies"}
       </Button>
+    </div>
+  );
+}
+
+function InstallProgressModal({ install }: { install: InstallState }) {
+  const dismiss = useMlFeaturesStore((s) => s.dismissInstallResult);
+  const logEndRef = useRef<HTMLDivElement | null>(null);
+
+  // Autoscroll to bottom as new lines come in. jsdom (test env) doesn't
+  // implement scrollIntoView; gate on its presence.
+  useEffect(() => {
+    if (logEndRef.current && typeof logEndRef.current.scrollIntoView === "function") {
+      logEndRef.current.scrollIntoView({ block: "end" });
+    }
+  }, [install.log]);
+
+  const heading = install.running
+    ? `Installing ${install.pendingExtras.join(", ")}…`
+    : install.lastResult?.success
+      ? "Install complete"
+      : "Install failed";
+  const isError = !install.running && install.lastResult && !install.lastResult.success;
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+      data-testid="ml-install-progress-modal"
+    >
+      <div className="bg-surface-raised border border-surface-border rounded-lg shadow-xl w-[600px] max-h-[80vh] overflow-hidden flex flex-col">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-surface-border">
+          <h2 className={`text-sm font-semibold ${isError ? "text-red-400" : "text-gray-200"}`}>
+            {heading}
+          </h2>
+          {!install.running && (
+            <button
+              onClick={dismiss}
+              className="text-gray-400 hover:text-white"
+              data-testid="ml-install-progress-close"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+        <div className="px-4 py-3 flex-1 overflow-auto bg-black/40">
+          <pre
+            className="text-[11px] font-mono text-gray-300 whitespace-pre-wrap leading-tight"
+            data-testid="ml-install-progress-log"
+          >
+            {install.log.length === 0 && install.running ? "Starting uv sync…\n" : ""}
+            {install.log.map((entry, i) => (
+              <span
+                key={i}
+                className={
+                  entry.kind === "stderr"
+                    ? "text-yellow-400"
+                    : entry.kind === "info"
+                      ? "text-blue-400"
+                      : ""
+                }
+              >
+                {entry.line}
+                {"\n"}
+              </span>
+            ))}
+            <div ref={logEndRef} />
+          </pre>
+        </div>
+        {isError && install.lastResult?.error && (
+          <div className="px-4 py-2 border-t border-surface-border bg-red-900/20 text-red-300 text-[11px]">
+            {install.lastResult.error}
+          </div>
+        )}
+        {!install.running && (
+          <div className="flex justify-end px-4 py-2 border-t border-surface-border">
+            <Button onClick={dismiss} testId="ml-install-progress-dismiss">
+              Close
+            </Button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

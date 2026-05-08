@@ -18,6 +18,7 @@
 
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 export type ModelState =
   | "not_downloaded"
@@ -120,13 +121,39 @@ export function missingExtrasForFeature(
   return missing;
 }
 
+/** Install workflow progress (vault-347l Phase 2). One entry per
+ * stdout/stderr line emitted by `uv sync`. Frontend renders the tail. */
+export type InstallLogKind = "stdout" | "stderr" | "info";
+export interface InstallLogLine {
+  kind: InstallLogKind;
+  line: string;
+}
+
+/** Install workflow state. While `running` is true, the Settings UI
+ * shows a progress modal and disables overlapping install/uninstall
+ * clicks. `error` is set when uv sync exits non-zero or spawn fails. */
+export interface InstallState {
+  running: boolean;
+  /** Extras the in-flight install is targeting (for the modal title). */
+  pendingExtras: string[];
+  /** Tail of the uv sync output. Bounded to ~200 lines so we don't
+   * leak memory if the user leaves the modal open during a long install. */
+  log: InstallLogLine[];
+  /** Last completed install: `null` while running, `{success: true}`
+   * on completion, `{success: false, error}` on failure. */
+  lastResult: { success: boolean; error?: string } | null;
+}
+
 interface MlFeaturesState {
   status: MlStatus | null;
   /** Sidecar ML deps install state (vault-347l). null until first fetch. */
   deps: DepsStatus | null;
+  install: InstallState;
   loading: boolean;
   error: string | null;
   pollHandle: ReturnType<typeof setTimeout> | null;
+  /** Tauri event unsubscribers registered by `subscribeInstall`. */
+  installUnsubs: UnlistenFn[];
 
   refresh: () => Promise<void>;
   refreshDeps: () => Promise<void>;
@@ -137,9 +164,22 @@ interface MlFeaturesState {
   cancel: (modelId: string) => Promise<void>;
   remove: (modelId: string) => Promise<void>;
   reload: (modelId: string) => Promise<void>;
+  installDeps: (extras: string[]) => Promise<void>;
+  uninstallDeps: (extras: string[]) => Promise<void>;
+  subscribeInstall: () => Promise<void>;
+  unsubscribeInstall: () => void;
+  dismissInstallResult: () => void;
   startPolling: () => void;
   stopPolling: () => void;
 }
+
+const INSTALL_LOG_TAIL = 200;
+const INITIAL_INSTALL_STATE: InstallState = {
+  running: false,
+  pendingExtras: [],
+  log: [],
+  lastResult: null,
+};
 
 const POLL_MS = 1500;
 
@@ -151,9 +191,11 @@ function isTransient(status: MlStatus | null): boolean {
 export const useMlFeaturesStore = create<MlFeaturesState>((set, get) => ({
   status: null,
   deps: null,
+  install: INITIAL_INSTALL_STATE,
   loading: false,
   error: null,
   pollHandle: null,
+  installUnsubs: [],
 
   async refresh() {
     set({ loading: true, error: null });
@@ -180,6 +222,106 @@ export const useMlFeaturesStore = create<MlFeaturesState>((set, get) => ({
       // the greyed-toggle UX. Log to console for diagnosis.
       console.warn("deps_get_status failed", e);
     }
+  },
+
+  async installDeps(extras) {
+    if (extras.length === 0) return;
+    if (get().install.running) {
+      console.warn("installDeps called while another install is in-flight");
+      return;
+    }
+    set({
+      install: {
+        running: true,
+        pendingExtras: [...extras],
+        log: [],
+        lastResult: null,
+      },
+    });
+    try {
+      await invoke("deps_install", { extras });
+    } catch (e) {
+      // The Rust spawn failed before any background thread fired — we
+      // never get a deps_install_complete event. Mark the install
+      // failed inline so the modal can close.
+      set({
+        install: {
+          ...get().install,
+          running: false,
+          lastResult: { success: false, error: String(e) },
+        },
+      });
+    }
+  },
+
+  async uninstallDeps(extras) {
+    if (extras.length === 0) return;
+    if (get().install.running) return;
+    set({
+      install: {
+        running: true,
+        pendingExtras: [...extras],
+        log: [],
+        lastResult: null,
+      },
+    });
+    try {
+      await invoke("deps_uninstall", { extras });
+    } catch (e) {
+      set({
+        install: {
+          ...get().install,
+          running: false,
+          lastResult: { success: false, error: String(e) },
+        },
+      });
+    }
+  },
+
+  async subscribeInstall() {
+    if (get().installUnsubs.length > 0) return;
+
+    const progressUnsub = await listen<InstallLogLine>(
+      "deps_install_progress",
+      (event) => {
+        const cur = get().install;
+        const next = [...cur.log, event.payload];
+        if (next.length > INSTALL_LOG_TAIL) {
+          next.splice(0, next.length - INSTALL_LOG_TAIL);
+        }
+        set({ install: { ...cur, log: next } });
+      },
+    );
+    const completeUnsub = await listen<{ success: boolean; error?: string }>(
+      "deps_install_complete",
+      async (event) => {
+        const cur = get().install;
+        set({
+          install: {
+            ...cur,
+            running: false,
+            lastResult: { success: event.payload.success, error: event.payload.error },
+          },
+        });
+        // Refresh deps + ml status so the toggles update.
+        await get().refreshDeps();
+        await get().refresh();
+      },
+    );
+    set({ installUnsubs: [progressUnsub, completeUnsub] });
+  },
+
+  unsubscribeInstall() {
+    for (const unsub of get().installUnsubs) {
+      try { unsub(); } catch (e) { console.warn("install unsub failed", e); }
+    }
+    set({ installUnsubs: [] });
+  },
+
+  dismissInstallResult() {
+    set({
+      install: { ...get().install, lastResult: null, log: [] },
+    });
   },
 
   async setFeatureEnabled(featureId, enabled) {
