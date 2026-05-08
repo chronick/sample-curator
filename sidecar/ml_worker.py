@@ -111,20 +111,212 @@ def loaded_model() -> dict:
 # Per-kind inference stubs — slice 4 implements these for real.
 
 def embed_clap(model_id: str, audio_path: str) -> dict:
-    return _not_implemented("embed_clap", model_id=model_id, audio_path=audio_path)
+    """Zero-shot audio classification via CLAP. Returns ranked (label, confidence) pairs.
+
+    The sidecar downloaded the HF snapshot to ~/.music-hub-data/ml-models/<safe_id>/.
+    We load from there (not via laion_clap's built-in download).
+
+    CLAP categories are the same hardcoded set as in naming.py.
+    """
+    try:
+        from transformers import ClapModel, ClapProcessor
+    except ImportError as e:
+        return {
+            "results": None,
+            "error": f"transformers not available; run `uv sync --extra embedding`: {e}",
+        }
+
+    # Category prompts (matches naming.py's CLAP_CATEGORIES)
+    CLAP_CATEGORIES = [
+        ("a kick drum sample", "kick"),
+        ("a snare drum sample", "snare"),
+        ("a hi-hat sample", "hat"),
+        ("a cymbal sample", "cymbal"),
+        ("a percussion hit", "perc"),
+        ("a bass sound", "bass"),
+        ("a sub bass sound", "sub"),
+        ("a synth lead sound", "lead"),
+        ("a pad or ambient drone", "pad"),
+        ("a chord progression", "chord"),
+        ("a melodic phrase", "melody"),
+        ("a vocal recording", "vocal"),
+        ("a spoken voice", "voice"),
+        ("a textural sound design element", "texture"),
+        ("a noise or glitch sound", "noise"),
+        ("an ambient drone", "drone"),
+        ("a drum loop", "drum-loop"),
+        ("a sound effect", "fx"),
+        ("a field recording", "field"),
+        ("an acoustic instrument", "acoustic"),
+    ]
+
+    try:
+        ckpt_dir = _hf_snapshot_dir(model_id)
+        if not (ckpt_dir / "config.json").is_file():
+            return {
+                "results": None,
+                "error": f"No config.json in {ckpt_dir} — download via Settings first.",
+            }
+
+        # Load model + processor (lazy, reuse _LOADED cache)
+        cache_key = f"clap:{model_id}"
+        with _LOADED_LOCK:
+            cached = _LOADED.get(cache_key)
+            if cached is None:
+                model = ClapModel.from_pretrained(str(ckpt_dir))
+                processor = ClapProcessor.from_pretrained(str(ckpt_dir))
+                cached = {"model": model, "processor": processor}
+                _LOADED[cache_key] = cached
+                _LOADED["kind"] = "clap"
+                _LOADED["model_id"] = model_id
+                _LOADED["loaded"] = True
+            model = cached["model"]
+            processor = cached["processor"]
+
+        # Load audio and normalize
+        import soundfile as sf
+        import numpy as np
+        import torch
+
+        audio, sr = sf.read(audio_path, dtype="float32", always_2d=False)
+        if audio.ndim > 1:
+            audio = audio.mean(axis=1)
+        if sr != 48000:
+            import librosa
+            audio = librosa.resample(audio, orig_sr=sr, target_sr=48000)
+
+        # Encode audio and text prompts
+        prompts = [p for p, _ in CLAP_CATEGORIES]
+        inputs = processor(audios=audio[None, :], return_tensors="pt")
+        text_inputs = processor(text=prompts, return_tensors="pt")
+
+        with torch.no_grad():
+            audio_features = model.get_audio_features(**inputs)
+            text_features = model.get_text_features(**text_inputs)
+
+        # Normalize and compute cosine similarity
+        audio_features = audio_features / np.linalg.norm(audio_features.cpu().numpy(), axis=1, keepdims=True)
+        text_features = text_features / np.linalg.norm(text_features.cpu().numpy(), axis=1, keepdims=True)
+        sims = (audio_features @ text_features.T).cpu().numpy()[0]
+
+        # Rank by confidence
+        ranked = [
+            (CLAP_CATEGORIES[i][1], float(sims[i]))
+            for i in range(len(sims))
+        ]
+        ranked.sort(key=lambda x: x[1], reverse=True)
+
+        return {"results": ranked}
+    except Exception as e:
+        traceback.print_exc(file=sys.stderr)
+        return {"results": None, "error": f"CLAP inference failed: {e}"}
 
 
 def transcribe_whisper(model_id: str, audio_path: str) -> dict:
-    return _not_implemented("transcribe_whisper", model_id=model_id, audio_path=audio_path)
+    """Speech-to-text via faster-whisper. Returns full transcript."""
+    try:
+        from faster_whisper import WhisperModel
+    except ImportError as e:
+        return {
+            "transcript": None,
+            "error": f"faster-whisper not available; run `uv sync --extra transcription`: {e}",
+        }
+
+    try:
+        ckpt_dir = _hf_snapshot_dir(model_id)
+
+        # Load model (lazy, reuse _LOADED cache)
+        cache_key = f"whisper:{model_id}"
+        with _LOADED_LOCK:
+            cached = _LOADED.get(cache_key)
+            if cached is None:
+                # HF repos have original PyTorch weights, not CT2 format.
+                # If we have model.bin (CT2), use the local path; otherwise fall back to size string.
+                size = model_id.rsplit("-", 1)[-1]  # "openai/whisper-tiny" -> "tiny"
+                if (ckpt_dir / "model.bin").is_file():
+                    model = WhisperModel(str(ckpt_dir), device="cpu", compute_type="int8")
+                else:
+                    model = WhisperModel(size, device="cpu", compute_type="int8")
+                cached = {"model": model}
+                _LOADED[cache_key] = cached
+                _LOADED["kind"] = "whisper"
+                _LOADED["model_id"] = model_id
+                _LOADED["loaded"] = True
+            model = cached["model"]
+
+        # Transcribe
+        segments, _info = model.transcribe(audio_path, beam_size=1, language="en", vad_filter=True)
+        text_parts: list[str] = []
+        for seg in segments:
+            text_parts.append(seg.text.strip())
+        transcript = " ".join(p for p in text_parts if p).strip()
+
+        return {
+            "transcript": transcript if transcript else None,
+        }
+    except Exception as e:
+        traceback.print_exc(file=sys.stderr)
+        return {"transcript": None, "error": f"Whisper transcription failed: {e}"}
 
 
 def separate_demucs(model_id: str, audio_path: str, output_dir: str) -> dict:
-    return _not_implemented(
-        "separate_demucs",
-        model_id=model_id,
-        audio_path=audio_path,
-        output_dir=output_dir,
-    )
+    """Stem separation via demucs. Returns dict with paths to separated stems."""
+    try:
+        from demucs.pretrained import get_model
+    except ImportError as e:
+        return {
+            "stems": None,
+            "error": f"demucs not available; run `uv sync --extra stems`: {e}",
+        }
+
+    try:
+        from pathlib import Path
+        short = model_id.rsplit("/", 1)[-1]  # "facebook/htdemucs" -> "htdemucs"
+
+        # Load model (lazy, reuse _LOADED cache)
+        cache_key = f"demucs:{model_id}"
+        with _LOADED_LOCK:
+            cached = _LOADED.get(cache_key)
+            if cached is None:
+                model = get_model(short)  # demucs handles download to ~/.cache/torch/hub/
+                cached = {"model": model}
+                _LOADED[cache_key] = cached
+                _LOADED["kind"] = "demucs"
+                _LOADED["model_id"] = model_id
+                _LOADED["loaded"] = True
+            model = cached["model"]
+
+        # Separate stems
+        import torch
+        audio, sr = __import__("torchaudio").load(audio_path)
+
+        # Demucs expects stereo or mono at 44.1kHz; resample if needed
+        if sr != 44100:
+            resampler = __import__("torchaudio").transforms.Resample(sr, 44100)
+            audio = resampler(audio)
+
+        # Ensure stereo
+        if audio.shape[0] == 1:
+            audio = audio.repeat(2, 1)
+
+        with torch.no_grad():
+            sources = model.separate(audio[None, ...])  # batch dim
+
+        # Save stems
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        stems = {}
+        for stem_idx, stem_name in enumerate(model.sources):
+            stem_audio = sources[0, stem_idx]
+            stem_file = output_path / f"{stem_name}.wav"
+            __import__("torchaudio").save(str(stem_file), stem_audio, 44100)
+            stems[stem_name] = str(stem_file)
+
+        return {"stems": stems}
+    except Exception as e:
+        traceback.print_exc(file=sys.stderr)
+        return {"stems": None, "error": f"Demucs separation failed: {e}"}
 
 
 def refine_llm_hf(model_id: str, prompt: str, max_new_tokens: int = 24) -> dict:

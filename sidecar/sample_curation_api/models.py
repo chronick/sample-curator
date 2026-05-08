@@ -278,62 +278,13 @@ def remove_model(model_id: str) -> dict:
 
 
 def _instantiate_model(model_id: str) -> Any:
-    """Load a model into memory based on its kind.
+    """Load an HF causal-LM model for LLM naming-refinement (vault-3ume).
 
-    Real instantiation is best-effort: if the underlying lib (laion-clap,
-    faster-whisper, demucs) is not installed, the load surfaces a clear
-    error and the model stays in ``downloaded_not_loaded``. Callers must
-    handle that — see vault-knuo task description for the bundled-app
-    library-installation followup.
+    CLAP / Whisper / Demucs inference is now delegated to the ml_worker
+    subprocess (vault-347l Phase 2 slice 4) and this function only handles
+    HF causal-LM models. The worker loads those models in the runtime venv
+    with transformers + torch.
     """
-    if model_id.startswith("laion/clap-"):
-        # The HF mirror at ``laion/clap-htsat-unfused`` ships
-        # transformers-format weights (``pytorch_model.bin`` + ``config.json``),
-        # not the laion-clap library's original ``.pt`` checkpoint format —
-        # different lib, same model. Load via ``transformers.ClapModel`` so
-        # we can use the HF snapshot directly.
-        try:
-            from transformers import ClapModel, ClapProcessor
-        except ImportError as e:
-            raise RuntimeError(
-                f"transformers not installed; run `uv sync --extra embedding`. ({e})"
-            ) from e
-        ckpt_dir = _model_path(model_id)
-        if not (ckpt_dir / "config.json").is_file():
-            raise RuntimeError(f"No config.json found in {ckpt_dir}")
-        return {
-            "model": ClapModel.from_pretrained(str(ckpt_dir)),
-            "processor": ClapProcessor.from_pretrained(str(ckpt_dir)),
-        }
-    if model_id.startswith("openai/whisper-"):
-        try:
-            from faster_whisper import WhisperModel
-        except ImportError as e:
-            raise RuntimeError(
-                f"faster-whisper not installed; run `uv sync --extra transcription`. ({e})"
-            ) from e
-        ckpt_dir = _model_path(model_id)
-        # faster-whisper accepts a local path containing the converted model
-        # files. The HF repos for openai/whisper-* contain the original PyTorch
-        # checkpoint, not the CT2 format faster-whisper expects — but passing
-        # the model size string falls back to its own download to ~/.cache/huggingface/.
-        # Prefer the local snapshot if it has model.bin (CT2), else fall back.
-        size = model_id.rsplit("-", 1)[-1]  # "openai/whisper-tiny" -> "tiny"
-        if (ckpt_dir / "model.bin").is_file():
-            return WhisperModel(str(ckpt_dir), device="cpu", compute_type="int8")
-        return WhisperModel(size, device="cpu", compute_type="int8")
-    if _strategy(model_id).startswith("lib_managed:demucs"):
-        try:
-            from demucs.pretrained import get_model
-        except ImportError as e:
-            raise RuntimeError(
-                f"demucs not installed; run `uv sync --extra stems`. ({e})"
-            ) from e
-        short = model_id.rsplit("/", 1)[-1]
-        return get_model(short)
-    # HF causal-LM models for the LLM naming-refinement feature
-    # (vault-3ume). Lookup uses the explicit registry in ``llm.HF_LLM_MODELS``
-    # so we don't accidentally LM-load arbitrary HF repos.
     from sample_curation_api.llm import HF_LLM_MODELS, instantiate_hf_llm
     if model_id in HF_LLM_MODELS:
         return instantiate_hf_llm(model_id)

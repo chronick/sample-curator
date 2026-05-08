@@ -134,26 +134,32 @@ class TestLifecycle:
 
 
 class TestStubs:
-    """Per-kind inference handlers are stubs in slice 3 — verify they
-    don't error and report ``not_implemented`` so callers know to wait
-    for slice 4."""
+    """Per-kind inference handlers (embed_clap, transcribe_whisper, separate_demucs)
+    are now implemented in slice 4b. They return soft-error payloads when
+    model files are missing (since the tests don't download weights)."""
 
     @pytest.mark.parametrize(
-        "method, params",
+        "method, params, result_key",
         [
-            ("embed_clap", {"model_id": "laion/clap-htsat-unfused", "audio_path": "/tmp/x.wav"}),
-            ("transcribe_whisper", {"model_id": "openai/whisper-tiny", "audio_path": "/tmp/x.wav"}),
+            ("embed_clap", {"model_id": "laion/clap-htsat-unfused", "audio_path": "/tmp/x.wav"}, "results"),
+            ("transcribe_whisper", {"model_id": "openai/whisper-tiny", "audio_path": "/tmp/x.wav"}, "transcript"),
             (
                 "separate_demucs",
                 {"model_id": "facebook/htdemucs", "audio_path": "/tmp/x.wav", "output_dir": "/tmp"},
+                "stems",
             ),
         ],
     )
-    def test_stub_returns_not_implemented(self, worker, method, params):
+    def test_inference_handlers_return_soft_error_when_models_missing(self, worker, method, params, result_key):
+        # Handlers are implemented but models aren't downloaded in tests.
+        # They should return a soft-error payload (result_key=None, error=message)
+        # instead of raising.
         resp = _send(worker, method, params)
         assert "result" in resp, f"got error: {resp.get('error')}"
-        assert resp["result"]["status"] == "not_implemented"
-        assert resp["result"]["method"] == method
+        result = resp["result"]
+        assert result.get(result_key) is None
+        assert "error" in result
+        # Error should indicate missing config.json or similar, not an exception
 
 
 class TestRefineLlmHf:

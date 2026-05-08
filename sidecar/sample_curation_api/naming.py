@@ -168,17 +168,40 @@ def _try_clap(path: str) -> list[tuple[str, float]] | None:
     """Zero-shot classify via CLAP. Returns ``[(label, conf), ...]`` sorted
     descending, or ``None`` if CLAP/torch aren't installed or inference fails.
 
-    CLAP model is ~1.5GB. First call lazy-loads the checkpoint.
+    Delegates to the ml_worker subprocess (vault-347l Phase 2 slice 4).
+    Falls back to in-process loading in dev if the worker isn't available.
     """
-    try:  # noqa: SIM105 — want a distinct except for diagnostics
-        import laion_clap  # type: ignore
-        import numpy as np  # noqa: F401
+    try:
+        from sample_curation_api.worker_manager import available, get_worker, WorkerError
     except Exception:
         return None
 
+    # Try worker path first (production + tests with runtime venv)
+    if available():
+        try:
+            wm = get_worker()
+            result = wm.call(
+                "embed_clap",
+                {
+                    "model_id": "laion/clap-htsat-unfused",
+                    "audio_path": path,
+                },
+            )
+            if result.get("results") is not None:
+                return result.get("results")
+            else:
+                log.warning("CLAP worker error: %s", result.get("error"))
+        except WorkerError as e:
+            log.debug("CLAP worker unavailable: %s", e)
+        except Exception as e:
+            log.warning("CLAP worker call failed: %s", e)
+
+    # Fallback: in-process loading (dev, or if worker isn't available)
     try:
+        import laion_clap  # type: ignore
+        import numpy as np
+
         model = _get_clap_model(laion_clap)
-        # CLAP expects mono float32 at 48kHz. Use soundfile to load.
         import soundfile as sf
 
         audio, sr = sf.read(path, dtype="float32", always_2d=False)
@@ -186,15 +209,11 @@ def _try_clap(path: str) -> list[tuple[str, float]] | None:
             audio = audio.mean(axis=1)
         if sr != 48000:
             import librosa
-
             audio = librosa.resample(audio, orig_sr=sr, target_sr=48000)
 
         prompts = [p for p, _ in CLAP_CATEGORIES]
         audio_emb = model.get_audio_embedding_from_data(x=audio[None, :])
         text_emb = model.get_text_embedding(prompts)
-        # Cosine similarity
-        import numpy as np
-
         audio_emb = audio_emb / np.linalg.norm(audio_emb, axis=1, keepdims=True)
         text_emb = text_emb / np.linalg.norm(text_emb, axis=1, keepdims=True)
         sims = (audio_emb @ text_emb.T)[0]
@@ -213,7 +232,7 @@ _CLAP_MODEL = None
 
 
 def _get_clap_model(laion_clap_mod) -> object:
-    """Lazy-load the CLAP checkpoint once per process."""
+    """Lazy-load the CLAP checkpoint once per process (dev fallback only)."""
     global _CLAP_MODEL
     if _CLAP_MODEL is None:
         _CLAP_MODEL = laion_clap_mod.CLAP_Module(enable_fusion=False)
@@ -458,7 +477,37 @@ def _transcribe(path: str) -> str | None:
     """Return the full transcript of ``path`` as a single string. Returns
     ``None`` if faster-whisper isn't installed or transcription fails. The
     mechanical stem-extraction and LLM-refinement paths both consume this.
+
+    Delegates to the ml_worker subprocess (vault-347l Phase 2 slice 4).
+    Falls back to in-process loading in dev if the worker isn't available.
     """
+    try:
+        from sample_curation_api.worker_manager import available, get_worker, WorkerError
+    except Exception:
+        return None
+
+    # Try worker path first (production + tests with runtime venv)
+    if available():
+        try:
+            wm = get_worker()
+            result = wm.call(
+                "transcribe_whisper",
+                {
+                    "model_id": "openai/whisper-tiny",
+                    "audio_path": path,
+                },
+            )
+            transcript = result.get("transcript")
+            if transcript:
+                return transcript
+            else:
+                log.debug("Whisper worker error: %s", result.get("error"))
+        except WorkerError as e:
+            log.debug("Whisper worker unavailable: %s", e)
+        except Exception as e:
+            log.warning("Whisper worker call failed: %s", e)
+
+    # Fallback: in-process loading (dev, or if worker isn't available)
     try:
         import faster_whisper  # noqa: F401
     except Exception:
