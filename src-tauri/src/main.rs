@@ -10,6 +10,7 @@ mod analysis_pipeline;
 mod audio;
 mod categorization;
 mod db_commands;
+mod deps;
 mod duplicates;
 mod foundation_models;
 mod import_commands;
@@ -802,8 +803,10 @@ fn main() {
             ml_commands::ml_load_model,
             ml_commands::ml_unload_model,
             ml_commands::ml_reload_model,
-            // Runtime ML deps detection (vault-347l)
+            // Runtime ML deps detection + install (vault-347l)
             ml_commands::deps_get_status,
+            deps::deps_install,
+            deps::deps_uninstall,
             // Apple Foundation Models bridge (vault-3ume)
             foundation_models::llm_foundation_refine,
             foundation_models::llm_foundation_availability,

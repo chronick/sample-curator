@@ -1187,12 +1187,44 @@ pub struct DepsStatus {
 }
 
 /// Report which sidecar ML extras (transformers/torch/faster-whisper/demucs/
-/// ollama/accelerate) are installed in the running sidecar's interpreter.
-/// Phase 1: read-only — Settings UI uses this to grey feature toggles whose
-/// deps are missing. Phase 2 (separate task) wires actual install via a
-/// uv-managed runtime venv.
+/// ollama) are installed.
+///
+/// Two views merged:
+///
+/// 1. The frozen sidecar's interpreter (read via the sidecar `deps_status`
+///    RPC). In dev this is the user's `uv sync`'d sidecar venv with all
+///    extras present; in prod the frozen .pkg ships without them.
+/// 2. The runtime venv's `state.json` (see `deps::runtime_installed_extras`).
+///    Populated as users install extras via the Phase 2 `deps_install`
+///    command.
+///
+/// An extra counts as installed if either view confirms it. The
+/// frontend treats this as the source of truth for greying toggles
+/// (vault-347l Phase 1) and for showing per-extra Install / Uninstall
+/// buttons (Phase 2).
 #[tauri::command]
 pub fn deps_get_status(app_state: State<'_, AppState>) -> Result<DepsStatus, String> {
     let raw = rpc(&app_state, "deps_status", serde_json::json!({}))?;
-    serde_json::from_value(raw).map_err(|e| format!("deps_status decode failed: {e}"))
+    let mut sidecar_view: DepsStatus =
+        serde_json::from_value(raw).map_err(|e| format!("deps_status decode failed: {e}"))?;
+
+    // Merge the runtime state file. If state.json says `embedding` is
+    // installed, treat embedding as installed even when the sidecar
+    // interpreter doesn't see it (prod path).
+    let runtime_extras = crate::deps::runtime_installed_extras();
+    for extra in runtime_extras {
+        let entry = sidecar_view
+            .extras
+            .entry(extra.clone())
+            .or_insert(ExtraStatus {
+                installed: false,
+                missing: Vec::new(),
+            });
+        if !entry.installed {
+            entry.installed = true;
+            entry.missing.clear();
+        }
+    }
+
+    Ok(sidecar_view)
 }
