@@ -277,17 +277,57 @@ def remove_model(model_id: str) -> dict:
     return get_model_state(model_id)
 
 
-def _instantiate_model(model_id: str) -> Any:
-    """Load an HF causal-LM model for LLM naming-refinement (vault-3ume).
+_WORKER_DELEGATED_KINDS: dict[str, str] = {
+    "laion/clap-htsat-unfused": "embedding",
+    "laion/clap-htsat-fused": "embedding",
+    "openai/whisper-tiny": "transcription",
+    "openai/whisper-base": "transcription",
+    "facebook/htdemucs": "stems",
+}
 
-    CLAP / Whisper / Demucs inference is now delegated to the ml_worker
-    subprocess (vault-347l Phase 2 slice 4) and this function only handles
-    HF causal-LM models. The worker loads those models in the runtime venv
-    with transformers + torch.
+
+def _instantiate_model(model_id: str) -> Any:
+    """Resolve a load_model request.
+
+    For every kind that ships its inference through the runtime worker
+    subprocess (CLAP, Whisper, Demucs, HF causal-LM), the frozen sidecar
+    can't actually instantiate the model — its bundled Python lacks
+    transformers / torch / faster-whisper / demucs. Those libs only live
+    in the uv-managed runtime venv (vault-347l Phase 2). The worker
+    lazy-loads on the first inference call.
+
+    So for delegated kinds we return a marker dict; ``_LOADED[model_id]``
+    gets populated and the UI shows ``loaded`` / "ready". When the
+    runtime venv is missing, the inference call returns the existing
+    soft-error contract — the UI surfaces that on Reload/Retry, not on
+    load_model.
+
+    Anything not in the registry (and not a known HF LLM) is a bug.
     """
+    if model_id in _WORKER_DELEGATED_KINDS:
+        return {
+            "delegated_to_worker": True,
+            "kind": _WORKER_DELEGATED_KINDS[model_id],
+            "model_id": model_id,
+        }
     from sample_curation_api.llm import HF_LLM_MODELS, instantiate_hf_llm
     if model_id in HF_LLM_MODELS:
-        return instantiate_hf_llm(model_id)
+        # Dev path: when transformers + torch are available in *this*
+        # interpreter (sidecar venv), prefer in-process load so the dev
+        # fallback in ``llm.refine_via_hf`` keeps working when no runtime
+        # venv has been provisioned.
+        # Frozen sidecar / runtime-venv-only path: ImportError raises here;
+        # fall through to the marker so the worker handles inference.
+        try:
+            return instantiate_hf_llm(model_id)
+        except RuntimeError as e:
+            if "transformers/torch not installed" not in str(e):
+                raise
+        return {
+            "delegated_to_worker": True,
+            "kind": "llm",
+            "model_id": model_id,
+        }
     raise RuntimeError(f"Unsupported model kind: {model_id}")
 
 
