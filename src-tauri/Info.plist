@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+      macOS gates microphone access on this key. Without it, cpal opens
+      the input stream silently but the OS feeds zeros — visible in-app
+      as a level meter pinned at -∞ dB and zero recording. Required for
+      every signed prod build; dev (cargo run from a terminal) inherits
+      the terminal's TCC entitlements and works without it.
+    -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Sample Curator records audio from your selected input device for sample capture and analysis.</string>
+</dict>
+</plist>
